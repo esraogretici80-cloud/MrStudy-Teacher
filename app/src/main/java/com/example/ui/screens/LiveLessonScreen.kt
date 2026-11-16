@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -129,6 +130,7 @@ fun LiveLessonScreen(
     onToggleMute: () -> Unit,
     onToggleBluetoothAudio: () -> Unit = {},
     onChangeLivePdfPage: (delta: Int) -> Unit = {},
+    onJumpLivePdfPage: (pageNumber: Int) -> Unit = {},
     onSelectPdfForLive: (PdfResourceRecord) -> Unit = {},
     onSendLiveText: (String) -> Unit,
     onSendLiveImageUri: (Uri) -> Unit,
@@ -158,6 +160,8 @@ fun LiveLessonScreen(
     var showSubjectMenu by remember { mutableStateOf(false) }
     var showPdfMenu by remember { mutableStateOf(false) }
     var isPdfPreviewExpanded by remember { mutableStateOf(false) }
+    var showJumpToPageDialog by remember { mutableStateOf(false) }
+    var jumpInputText by remember { mutableStateOf("") }
     var quickInputText by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -576,22 +580,38 @@ fun LiveLessonScreen(
                                     )
                                 }
 
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            jumpInputText = appState.activePdfPage.toString()
+                                            showJumpToPageDialog = true
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        .testTag("pdf_page_counter_clickable")
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(
                                             text = "Sayfa ${appState.activePdfPage} / ${currentPdf.pageCount}",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Klavyeden Sayfa Seç",
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.primary
                                         )
                                         if (appState.isPdfBusy) {
                                             CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                                         }
                                     }
                                     Text(
-                                        text = if (liveState.isSessionActive) "Öğretmen bu sayfayı görüyor" else "Ders başladığında gösterilir",
+                                        text = "Klavyeyle gitmek için dokun",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
 

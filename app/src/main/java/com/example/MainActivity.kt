@@ -304,6 +304,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onToggleMute = viewModel::toggleLiveMute,
                                     onToggleBluetoothAudio = viewModel::toggleBluetoothAudio,
                                     onChangeLivePdfPage = viewModel::changeLivePdfPage,
+                                    onJumpLivePdfPage = viewModel::jumpLiveToPdfPage,
                                     onSelectPdfForLive = viewModel::selectPdfForLive,
                                     onSendLiveText = viewModel::sendLiveText,
                                     onSendLiveImageUri = { uri -> viewModel.sendLiveImageUri(context, uri) },
