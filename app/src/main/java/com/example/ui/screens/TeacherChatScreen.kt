@@ -50,6 +50,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -387,12 +388,11 @@ fun TeacherChatScreen(
 
             if (state.isTeacherStreaming) {
                 item {
-                    val liveText = state.streamingReply.ifBlank { "Öğretmenin düşünüyor ve yanıtı hazırlıyor..." }
                     ChatBubble(
                         message = ChatMessage(
                             id = "streaming",
                             role = "assistant",
-                            content = liveText,
+                            content = state.streamingReply,
                             teachingMode = state.selectedMode.title
                         ),
                         isSpeaking = false,
@@ -687,10 +687,29 @@ private fun ChatBubble(
                     Spacer(modifier = Modifier.height(4.dp))
                 }
 
-                Text(
-                    text = message.content,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                if (isStreaming && message.content.isBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "MrStudy sorunu inceliyor ve en iyi çözümü hazırlıyor...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
         }
     }
