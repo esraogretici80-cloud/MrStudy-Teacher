@@ -1,0 +1,411 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidStringList(val, maxItems) {
+      return val is list && val.size() <= maxItems && (val.size() == 0 || val[0] is string);
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp && val <= request.time;
+    }
+
+    // --- Validation Helpers ---
+    function isValidStudentProfile(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.displayName, 1, 60) &&
+             (!('email' in data) || isValidString(data.email, 0, 120)) &&
+             isValidString(data.gradeLevel, 1, 40) &&
+             (!('targetGoal' in data) || isValidString(data.targetGoal, 0, 120)) &&
+             (!('dailyGoalMinutes' in data) || (data.dailyGoalMinutes is int && data.dailyGoalMinutes >= 5 && data.dailyGoalMinutes <= 480)) &&
+             data.xp is int && data.xp >= 0 &&
+             data.level is int && data.level >= 1 &&
+             (!('streakDays' in data) || (data.streakDays is int && data.streakDays >= 0)) &&
+             (!('totalStudyMinutes' in data) || (data.totalStudyMinutes is int && data.totalStudyMinutes >= 0)) &&
+             (!('questionsSolved' in data) || (data.questionsSolved is int && data.questionsSolved >= 0)) &&
+             (!('darkThemeMode' in data) || data.darkThemeMode in ['system', 'light', 'dark']) &&
+             (!('preferredMode' in data) || isValidString(data.preferredMode, 1, 40)) &&
+             (!('badges' in data) || isValidStringList(data.badges, 30));
+    }
+
+    function isValidChatSession(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.title, 1, 120) &&
+             isValidString(data.subject, 1, 60) &&
+             isValidString(data.teachingMode, 1, 40) &&
+             data.explanationDepth in ['kisa', 'normal', 'detayli'] &&
+             (!('sourcePdfId' in data) || isValidString(data.sourcePdfId, 0, 128)) &&
+             (!('sourcePdfTitle' in data) || isValidString(data.sourcePdfTitle, 0, 120)) &&
+             (!('sourcePage' in data) || (data.sourcePage is int && data.sourcePage >= 0 && data.sourcePage <= 5000)) &&
+             (!('messageCount' in data) || (data.messageCount is int && data.messageCount >= 0 && data.messageCount <= 10000)) &&
+             (!('lastMessagePreview' in data) || isValidString(data.lastMessagePreview, 0, 300));
+    }
+
+    function isValidChatMessage(data) {
+      return isValidString(data.userId, 1, 128) &&
+             data.role in ['user', 'assistant'] &&
+             isValidString(data.content, 1, 20000) &&
+             (!('teachingMode' in data) || isValidString(data.teachingMode, 0, 40)) &&
+             (!('hasAttachment' in data) || data.hasAttachment is bool) &&
+             (!('attachmentLabel' in data) || isValidString(data.attachmentLabel, 0, 120)) &&
+             (!('sourceCitation' in data) || isValidString(data.sourceCitation, 0, 200));
+    }
+
+    function isValidPdfResource(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.title, 1, 120) &&
+             isValidString(data.subject, 1, 60) &&
+             isValidString(data.localUriString, 1, 1000) &&
+             data.pageCount is int && data.pageCount >= 1 && data.pageCount <= 5000 &&
+             data.lastStudiedPage is int && data.lastStudiedPage >= 1 && data.lastStudiedPage <= 5000 &&
+             (!('summary' in data) || isValidString(data.summary, 0, 8000)) &&
+             (!('topics' in data) || isValidStringList(data.topics, 40));
+    }
+
+    function isValidExamRecord(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.title, 1, 120) &&
+             isValidString(data.subject, 1, 60) &&
+             isValidString(data.topic, 1, 120) &&
+             isValidString(data.difficulty, 1, 30) &&
+             data.questionCount is int && data.questionCount >= 1 && data.questionCount <= 50 &&
+             data.correctCount is int && data.correctCount >= 0 && data.correctCount <= 50 &&
+             data.scorePercent is int && data.scorePercent >= 0 && data.scorePercent <= 100 &&
+             (!('durationSeconds' in data) || (data.durationSeconds is int && data.durationSeconds >= 0 && data.durationSeconds <= 14400)) &&
+             (!('sourceType' in data) || isValidString(data.sourceType, 0, 40)) &&
+             (!('weakTopics' in data) || isValidStringList(data.weakTopics, 20)) &&
+             (!('errorCategories' in data) || isValidStringList(data.errorCategories, 20)) &&
+             (!('aiReport' in data) || isValidString(data.aiReport, 0, 8000)) &&
+             (!('wrongQuestionsSummary' in data) || isValidString(data.wrongQuestionsSummary, 0, 8000));
+    }
+
+    function isValidStudyPlanItem(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.subject, 1, 60) &&
+             isValidString(data.topic, 1, 120) &&
+             isValidString(data.dayLabel, 1, 40) &&
+             data.durationMinutes is int && data.durationMinutes >= 5 && data.durationMinutes <= 300 &&
+             (!('priority' in data) || isValidString(data.priority, 1, 30)) &&
+             (!('planType' in data) || isValidString(data.planType, 1, 40)) &&
+             data.isCompleted is bool &&
+             (!('postponedCount' in data) || (data.postponedCount is int && data.postponedCount >= 0 && data.postponedCount <= 50)) &&
+             (!('examDateText' in data) || isValidString(data.examDateText, 0, 40));
+    }
+
+    function isValidStudyNote(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.title, 1, 120) &&
+             isValidString(data.subject, 1, 60) &&
+             isValidString(data.content, 1, 20000) &&
+             (!('formulas' in data) || isValidStringList(data.formulas, 30)) &&
+             (!('definitions' in data) || isValidStringList(data.definitions, 30)) &&
+             (!('keyConcepts' in data) || isValidStringList(data.keyConcepts, 30)) &&
+             (!('sourcePdfTitle' in data) || isValidString(data.sourcePdfTitle, 0, 120));
+    }
+
+    function isValidFlashcardItem(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.subject, 1, 60) &&
+             isValidString(data.cardType, 1, 40) &&
+             isValidString(data.front, 1, 1000) &&
+             isValidString(data.back, 1, 2000) &&
+             data.masteryStatus in ['new', 'review', 'learned'] &&
+             (!('reviewCount' in data) || (data.reviewCount is int && data.reviewCount >= 0 && data.reviewCount <= 1000)) &&
+             (!('nextReviewAtMs' in data) || (data.nextReviewAtMs is int && data.nextReviewAtMs >= 0));
+    }
+
+    function isValidDailyLearningTask(data) {
+      return isValidString(data.userId, 1, 128) &&
+             isValidString(data.title, 1, 120) &&
+             (!('description' in data) || isValidString(data.description, 0, 300)) &&
+             data.xpReward is int && data.xpReward >= 5 && data.xpReward <= 500 &&
+             isValidString(data.dateKey, 1, 20) &&
+             data.isCompleted is bool;
+    }
+
+    // --- Collection Rules ---
+    match /users/{userId} {
+      allow get, list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().userId == userId &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'gradeLevel', 'xp', 'level', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'email', 'gradeLevel', 'targetGoal',
+                         'dailyGoalMinutes', 'xp', 'level', 'streakDays', 'totalStudyMinutes',
+                         'questionsSolved', 'darkThemeMode', 'preferredMode', 'badges',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidTimestamp(incoming().createdAt) &&
+                       isValidTimestamp(incoming().updatedAt) &&
+                       isValidStudentProfile(incoming());
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidStudentProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidTimestamp(incoming().updatedAt) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'email', 'gradeLevel', 'targetGoal', 'dailyGoalMinutes',
+                         'xp', 'level', 'streakDays', 'totalStudyMinutes', 'questionsSolved',
+                         'darkThemeMode', 'preferredMode', 'badges', 'updatedAt'
+                       ]);
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /chat_sessions/{sessionId} {
+        allow get: if isOwner(userId) && isValidId(sessionId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(sessionId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'title', 'subject', 'teachingMode', 'explanationDepth', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'subject', 'teachingMode', 'explanationDepth',
+                           'sourcePdfId', 'sourcePdfTitle', 'sourcePage', 'messageCount',
+                           'lastMessagePreview', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         isValidChatSession(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(sessionId) &&
+                         isValidChatSession(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'subject', 'teachingMode', 'explanationDepth',
+                           'sourcePdfId', 'sourcePdfTitle', 'sourcePage', 'messageCount',
+                           'lastMessagePreview', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(sessionId);
+
+        match /messages/{messageId} {
+          allow get: if isOwner(userId) && isValidId(sessionId) && isValidId(messageId);
+          allow list: if isOwner(userId) && isValidId(sessionId);
+
+          allow create: if isOwner(userId) &&
+                           isValidId(sessionId) &&
+                           isValidId(messageId) &&
+                           incoming().userId == userId &&
+                           incoming().keys().hasAll(['userId', 'role', 'content', 'createdAt']) &&
+                           incoming().keys().hasOnly([
+                             'userId', 'role', 'content', 'teachingMode',
+                             'hasAttachment', 'attachmentLabel', 'sourceCitation', 'createdAt'
+                           ]) &&
+                           isValidTimestamp(incoming().createdAt) &&
+                           isValidChatMessage(incoming()) &&
+                           exists(/databases/$(database)/documents/users/$(userId)/chat_sessions/$(sessionId));
+
+          allow update: if false;
+          allow delete: if isOwner(userId) && isValidId(sessionId) && isValidId(messageId);
+        }
+      }
+
+      match /pdf_sources/{pdfId} {
+        allow get: if isOwner(userId) && isValidId(pdfId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(pdfId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'title', 'subject', 'localUriString', 'pageCount', 'lastStudiedPage', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'subject', 'localUriString', 'pageCount',
+                           'lastStudiedPage', 'summary', 'topics', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         isValidPdfResource(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(pdfId) &&
+                         isValidPdfResource(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'subject', 'localUriString', 'pageCount',
+                           'lastStudiedPage', 'summary', 'topics', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(pdfId);
+      }
+
+      match /exams/{examId} {
+        allow get: if isOwner(userId) && isValidId(examId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(examId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'title', 'subject', 'topic', 'difficulty', 'questionCount', 'correctCount', 'scorePercent', 'createdAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'subject', 'topic', 'difficulty', 'questionCount',
+                           'correctCount', 'scorePercent', 'durationSeconds', 'sourceType',
+                           'weakTopics', 'errorCategories', 'aiReport', 'wrongQuestionsSummary', 'createdAt'
+                         ]) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidExamRecord(incoming());
+
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(examId);
+      }
+
+      match /study_plans/{planId} {
+        allow get: if isOwner(userId) && isValidId(planId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(planId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'subject', 'topic', 'dayLabel', 'durationMinutes', 'isCompleted', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'subject', 'topic', 'dayLabel', 'durationMinutes',
+                           'priority', 'planType', 'isCompleted', 'postponedCount',
+                           'examDateText', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         isValidStudyPlanItem(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(planId) &&
+                         isValidStudyPlanItem(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'subject', 'topic', 'dayLabel', 'durationMinutes', 'priority',
+                           'planType', 'isCompleted', 'postponedCount', 'examDateText', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(planId);
+      }
+
+      match /notes/{noteId} {
+        allow get: if isOwner(userId) && isValidId(noteId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(noteId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'title', 'subject', 'content', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'subject', 'content', 'formulas',
+                           'definitions', 'keyConcepts', 'sourcePdfTitle', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         isValidStudyNote(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(noteId) &&
+                         isValidStudyNote(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'subject', 'content', 'formulas', 'definitions',
+                           'keyConcepts', 'sourcePdfTitle', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(noteId);
+      }
+
+      match /flashcards/{cardId} {
+        allow get: if isOwner(userId) && isValidId(cardId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(cardId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'subject', 'cardType', 'front', 'back', 'masteryStatus', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'subject', 'cardType', 'front', 'back',
+                           'masteryStatus', 'reviewCount', 'nextReviewAtMs', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         isValidFlashcardItem(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(cardId) &&
+                         isValidFlashcardItem(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'subject', 'cardType', 'front', 'back', 'masteryStatus',
+                           'reviewCount', 'nextReviewAtMs', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(cardId);
+      }
+
+      match /daily_tasks/{taskId} {
+        allow get: if isOwner(userId) && isValidId(taskId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(taskId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'title', 'xpReward', 'dateKey', 'isCompleted', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'description', 'xpReward', 'dateKey',
+                           'isCompleted', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         isValidDailyLearningTask(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(taskId) &&
+                         isValidDailyLearningTask(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidTimestamp(incoming().updatedAt) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'description', 'xpReward', 'dateKey', 'isCompleted', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(taskId);
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "MrStudy",
+  "description": "Öğrenciler için kişiselleştirilmiş Türkçe AI öğretmen, PDF ve görsel analiz, akıllı sınav ve çalışma planı eğitim platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

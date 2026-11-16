@@ -1,0 +1,1153 @@
+package com.example.ui.viewmodel
+
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Log
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.core.friendlyFirestoreErrorMessage
+import com.example.data.ai.MrStudyAiService
+import com.example.data.model.ChatSession
+import com.example.data.model.DailyLearningTask
+import com.example.data.model.ExamDifficulty
+import com.example.data.model.ExamRecord
+import com.example.data.model.ExplanationDepth
+import com.example.data.model.FlashcardItem
+import com.example.data.model.PdfResourceRecord
+import com.example.data.model.QuestionType
+import com.example.data.model.StudentProfile
+import com.example.data.model.StudyNote
+import com.example.data.model.StudyPlanItem
+import com.example.data.model.TeachingMode
+import com.example.data.repository.MrStudyRepository
+import com.example.ui.state.AttachedImage
+import com.example.ui.state.ExamUiState
+import com.example.ui.state.MrStudyUiState
+import com.example.util.PdfHelper
+import com.google.firebase.firestore.FirebaseFirestoreException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+class MrStudyViewModel(
+    private val repository: MrStudyRepository,
+    private val aiService: MrStudyAiService,
+    private val currentUserId: String,
+    private val initialDisplayName: String,
+    private val initialEmail: String
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(MrStudyUiState())
+    val uiState: StateFlow<MrStudyUiState> = _uiState.asStateFlow()
+
+    private var messagesJob: Job? = null
+    private var examTimerJob: Job? = null
+
+    init {
+        initializeUserData()
+    }
+
+    private fun initializeUserData() {
+        viewModelScope.launch {
+            try {
+                val existed = repository.ensureProfileExists(
+                    userId = currentUserId,
+                    displayName = initialDisplayName,
+                    email = initialEmail
+                )
+                repository.ensureTodayTasksExist(currentUserId)
+                _uiState.update {
+                    it.copy(
+                        profile = existed,
+                        isProfileLoaded = true,
+                        showOnboardingDialog = existed.totalStudyMinutes == 0L && existed.questionsSolved == 0L && existed.xp <= 50L
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Profile bootstrap failed", e)
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+
+        observeAllCollections()
+    }
+
+    private fun observeAllCollections() {
+        viewModelScope.launch {
+            repository.observeProfile(currentUserId)
+                .catch { handleStreamError("profile", it) }
+                .collectLatest { profile ->
+                    if (profile != null) {
+                        _uiState.update {
+                            it.copy(
+                                profile = profile,
+                                isProfileLoaded = true,
+                                selectedMode = TeachingMode.fromTitle(profile.preferredMode)
+                            )
+                        }
+                    }
+                }
+        }
+
+        viewModelScope.launch {
+            repository.observeChatSessions(currentUserId)
+                .catch { handleStreamError("chat_sessions", it) }
+                .collectLatest { sessions ->
+                    _uiState.update { state ->
+                        val activeId = state.activeSessionId?.takeIf { id -> sessions.any { it.id == id } }
+                            ?: sessions.firstOrNull()?.id
+                        if (activeId != state.activeSessionId && activeId != null) {
+                            observeMessagesForSession(activeId)
+                        }
+                        state.copy(sessions = sessions, activeSessionId = activeId)
+                    }
+                }
+        }
+
+        viewModelScope.launch {
+            repository.observePdfSources(currentUserId)
+                .catch { handleStreamError("pdf_sources", it) }
+                .collectLatest { pdfs ->
+                    _uiState.update { state ->
+                        val activePdf = state.activePdfId?.takeIf { id -> pdfs.any { it.id == id } }
+                            ?: pdfs.firstOrNull()?.id
+                        state.copy(pdfSources = pdfs, activePdfId = activePdf)
+                    }
+                }
+        }
+
+        viewModelScope.launch {
+            repository.observeExams(currentUserId)
+                .catch { handleStreamError("exams", it) }
+                .collectLatest { exams ->
+                    _uiState.update { it.copy(examHistory = exams) }
+                }
+        }
+
+        viewModelScope.launch {
+            repository.observeStudyPlans(currentUserId)
+                .catch { handleStreamError("study_plans", it) }
+                .collectLatest { plans ->
+                    _uiState.update { it.copy(studyPlans = plans) }
+                }
+        }
+
+        viewModelScope.launch {
+            repository.observeNotes(currentUserId)
+                .catch { handleStreamError("notes", it) }
+                .collectLatest { notes ->
+                    _uiState.update { it.copy(notes = notes) }
+                }
+        }
+
+        viewModelScope.launch {
+            repository.observeFlashcards(currentUserId)
+                .catch { handleStreamError("flashcards", it) }
+                .collectLatest { cards ->
+                    _uiState.update { it.copy(flashcards = cards) }
+                }
+        }
+
+        viewModelScope.launch {
+            repository.observeDailyTasks(currentUserId)
+                .catch { handleStreamError("daily_tasks", it) }
+                .collectLatest { tasks ->
+                    _uiState.update { it.copy(dailyTasks = tasks) }
+                }
+        }
+    }
+
+    private fun handleStreamError(source: String, error: Throwable) {
+        val firestoreError = generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .firstOrNull()
+        if (firestoreError == null && error is CancellationException) throw error
+        Log.w(TAG, "Stream error in $source", firestoreError ?: error)
+        _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(firestoreError ?: error)) }
+    }
+
+    private fun observeMessagesForSession(sessionId: String) {
+        messagesJob?.cancel()
+        messagesJob = viewModelScope.launch {
+            repository.observeChatMessages(currentUserId, sessionId)
+                .catch { handleStreamError("messages", it) }
+                .collectLatest { msgs ->
+                    _uiState.update { it.copy(messages = msgs) }
+                }
+        }
+    }
+
+    fun dismissBanner() {
+        _uiState.update { it.copy(statusBanner = null, teacherError = null, pdfError = null, examError = null) }
+    }
+
+    fun setOnboardingVisible(visible: Boolean) {
+        _uiState.update { it.copy(showOnboardingDialog = visible) }
+    }
+
+    fun setProfileSheetVisible(visible: Boolean) {
+        _uiState.update { it.copy(showProfileSheet = visible) }
+    }
+
+    fun saveStudentProfile(
+        displayName: String,
+        gradeLevel: String,
+        targetGoal: String,
+        dailyGoalMinutes: Long,
+        darkThemeMode: String
+    ) {
+        viewModelScope.launch {
+            try {
+                val updated = _uiState.value.profile.copy(
+                    displayName = displayName.trim().ifBlank { "Öğrenci" },
+                    gradeLevel = gradeLevel,
+                    targetGoal = targetGoal.trim(),
+                    dailyGoalMinutes = dailyGoalMinutes.coerceIn(10L, 480L),
+                    darkThemeMode = darkThemeMode
+                )
+                repository.updateProfile(currentUserId, updated)
+                _uiState.update {
+                    it.copy(
+                        showOnboardingDialog = false,
+                        showProfileSheet = false,
+                        statusBanner = "Öğrenci profilin güncellendi."
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun toggleThemeMode(mode: String) {
+        viewModelScope.launch {
+            try {
+                repository.updateProfile(
+                    currentUserId,
+                    _uiState.value.profile.copy(darkThemeMode = mode)
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    // --- AI Teacher Controls ---
+    fun selectTeachingMode(mode: TeachingMode) {
+        _uiState.update { it.copy(selectedMode = mode) }
+        viewModelScope.launch {
+            try {
+                repository.updateProfile(
+                    currentUserId,
+                    _uiState.value.profile.copy(preferredMode = mode.title)
+                )
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun selectExplanationDepth(depth: ExplanationDepth) {
+        _uiState.update { it.copy(selectedDepth = depth) }
+    }
+
+    fun selectSubject(subject: String) {
+        _uiState.update { it.copy(selectedSubject = subject) }
+    }
+
+    fun selectChatSession(session: ChatSession) {
+        _uiState.update {
+            it.copy(
+                activeSessionId = session.id,
+                selectedSubject = session.subject,
+                selectedMode = TeachingMode.fromTitle(session.teachingMode),
+                selectedDepth = ExplanationDepth.fromKey(session.explanationDepth)
+            )
+        }
+        observeMessagesForSession(session.id)
+    }
+
+    fun createNewChatSession(
+        title: String = "Yeni Ders Oturumu",
+        subject: String = _uiState.value.selectedSubject,
+        pdf: PdfResourceRecord? = null,
+        page: Int = 1
+    ) {
+        viewModelScope.launch {
+            try {
+                val state = _uiState.value
+                val newId = repository.createChatSession(
+                    userId = currentUserId,
+                    title = title,
+                    subject = subject,
+                    teachingMode = state.selectedMode.title,
+                    explanationDepth = state.selectedDepth.key,
+                    sourcePdfId = pdf?.id.orEmpty(),
+                    sourcePdfTitle = pdf?.title.orEmpty(),
+                    sourcePage = if (pdf != null) page.toLong() else 0L
+                )
+                _uiState.update { it.copy(activeSessionId = newId, messages = emptyList()) }
+                observeMessagesForSession(newId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(teacherError = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun deleteChatSession(sessionId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteChatSession(currentUserId, sessionId)
+                if (_uiState.value.activeSessionId == sessionId) {
+                    _uiState.update { it.copy(activeSessionId = null, messages = emptyList()) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(teacherError = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun attachImages(context: Context, uris: List<Uri>) {
+        viewModelScope.launch {
+            try {
+                val decoded = uris.take(4).mapIndexed { idx, uri ->
+                    val bmp = PdfHelper.decodeScaledBitmap(context, uri)
+                    AttachedImage(uri = uri, bitmap = bmp, label = "Görsel ${idx + 1}")
+                }
+                _uiState.update { it.copy(attachedImages = (it.attachedImages + decoded).take(4)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(teacherError = "Görsel yüklenemedi: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    fun removeAttachedImage(uri: Uri) {
+        _uiState.update { state ->
+            state.copy(attachedImages = state.attachedImages.filterNot { it.uri == uri })
+        }
+    }
+
+    fun sendTeacherMessage(promptText: String, includeActivePdf: Boolean = true) {
+        val cleanPrompt = promptText.trim()
+        if (cleanPrompt.isBlank() && _uiState.value.attachedImages.isEmpty()) return
+
+        viewModelScope.launch {
+            val state = _uiState.value
+            val effectivePrompt = cleanPrompt.ifBlank {
+                "Yüklediğim görseli analiz et. Matematik sorusuysa adım adım çöz; şema, grafik, tablo veya harita ise açıkla. Okunamayan alan varsa belirt."
+            }
+            val imagesToSend = state.attachedImages
+            val activePdf = if (includeActivePdf) state.activePdf else null
+            val activePage = state.activePdfPage
+
+            _uiState.update {
+                it.copy(
+                    isTeacherStreaming = true,
+                    streamingReply = "",
+                    teacherError = null,
+                    attachedImages = emptyList()
+                )
+            }
+
+            try {
+                val sessionId = state.activeSessionId ?: repository.createChatSession(
+                    userId = currentUserId,
+                    title = effectivePrompt.take(40),
+                    subject = state.selectedSubject,
+                    teachingMode = state.selectedMode.title,
+                    explanationDepth = state.selectedDepth.key,
+                    sourcePdfId = activePdf?.id.orEmpty(),
+                    sourcePdfTitle = activePdf?.title.orEmpty(),
+                    sourcePage = if (activePdf != null) activePage.toLong() else 0L
+                ).also { createdId ->
+                    _uiState.update { it.copy(activeSessionId = createdId) }
+                    observeMessagesForSession(createdId)
+                }
+
+                val attachmentSummary = buildString {
+                    if (imagesToSend.isNotEmpty()) append("${imagesToSend.size} Görsel")
+                    if (activePdf != null) {
+                        if (isNotEmpty()) append(" • ")
+                        append("${activePdf.title} s.$activePage")
+                    }
+                }
+
+                repository.addChatMessage(
+                    userId = currentUserId,
+                    sessionId = sessionId,
+                    role = "user",
+                    content = effectivePrompt,
+                    teachingMode = state.selectedMode.title,
+                    hasAttachment = imagesToSend.isNotEmpty() || activePdf != null,
+                    attachmentLabel = attachmentSummary
+                )
+
+                val pdfSamples = if (activePdf != null) {
+                    PdfHelper.renderPdfSamplePages(activePdf.localUriString, activePage, maxPages = 3)
+                } else {
+                    emptyList()
+                }
+
+                val finalReply = StringBuilder()
+                aiService.streamTeacherReply(
+                    studentProfile = state.profile,
+                    subject = state.selectedSubject,
+                    mode = state.selectedMode,
+                    depth = state.selectedDepth,
+                    userPrompt = effectivePrompt,
+                    recentHistory = state.messages,
+                    attachedImages = imagesToSend.map { it.bitmap },
+                    pdfPageSamples = pdfSamples,
+                    pdfTitle = activePdf?.title,
+                    activePdfPage = if (activePdf != null) activePage else null
+                ).collect { partial ->
+                    finalReply.clear()
+                    finalReply.append(partial)
+                    _uiState.update { it.copy(streamingReply = partial) }
+                }
+
+                val citation = if (activePdf != null) {
+                    "Kaynak: ${activePdf.title} (s.$activePage)"
+                } else {
+                    "Genel Ders Anlatımı"
+                }
+
+                repository.addChatMessage(
+                    userId = currentUserId,
+                    sessionId = sessionId,
+                    role = "assistant",
+                    content = finalReply.toString(),
+                    teachingMode = state.selectedMode.title,
+                    sourceCitation = citation
+                )
+
+                repository.awardProgress(
+                    userId = currentUserId,
+                    currentProfile = _uiState.value.profile,
+                    xpDelta = 15L,
+                    minutesDelta = 3L,
+                    questionsDelta = 1L,
+                    newBadge = if (_uiState.value.profile.questionsSolved >= 4) "Meraklı Öğrenci" else null
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed sending message", e)
+                _uiState.update {
+                    it.copy(teacherError = e.localizedMessage ?: "Öğretmen yanıtı alınamadı.")
+                }
+            } finally {
+                _uiState.update { it.copy(isTeacherStreaming = false, streamingReply = "") }
+            }
+        }
+    }
+
+    // --- PDF Studio ---
+    fun importPdf(context: Context, uri: Uri, subject: String) {
+        importMultiplePdfs(context, listOf(uri), subject)
+    }
+
+    fun importMultiplePdfs(context: Context, uris: List<Uri>, subject: String) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isPdfBusy = true,
+                    pdfError = null,
+                    pdfImportProgressText = if (uris.size > 1) {
+                        "1 / ${uris.size} PDF işleniyor ve Firestore'a kaydediliyor..."
+                    } else {
+                        "PDF işleniyor ve Firestore'a kaydediliyor..."
+                    }
+                )
+            }
+            val importedNames = mutableListOf<String>()
+            val failedMessages = mutableListOf<String>()
+            var lastPdfId: String? = null
+            var lastPageBitmap: android.graphics.Bitmap? = null
+
+            try {
+                uris.forEachIndexed { index, uri ->
+                    if (uris.size > 1) {
+                        _uiState.update {
+                            it.copy(
+                                pdfImportProgressText = "${index + 1} / ${uris.size} PDF işleniyor ve Firestore'a kaydediliyor..."
+                            )
+                        }
+                    }
+                    try {
+                        val displayName = resolveFileName(context, uri)
+                        val info = PdfHelper.importPdfToAppStorage(context, uri, displayName)
+                        val pdfId = repository.addPdfSource(
+                            userId = currentUserId,
+                            title = info.fileName,
+                            subject = subject,
+                            localUriString = info.localPath,
+                            pageCount = info.pageCount.toLong()
+                        )
+                        lastPdfId = pdfId
+                        lastPageBitmap = PdfHelper.renderPdfPage(info.localPath, 0)
+                        importedNames.add(info.fileName)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        val name = runCatching { resolveFileName(context, uri) }.getOrDefault("Dosya")
+                        failedMessages.add("$name: ${e.localizedMessage ?: "Yüklenemedi"}")
+                    }
+                }
+
+                _uiState.update { state ->
+                    state.copy(
+                        activePdfId = lastPdfId ?: state.activePdfId,
+                        activePdfPage = if (lastPdfId != null) 1 else state.activePdfPage,
+                        renderedPdfPage = lastPageBitmap ?: state.renderedPdfPage,
+                        pdfError = if (failedMessages.isNotEmpty()) failedMessages.joinToString("\n") else null,
+                        statusBanner = when {
+                            importedNames.size == 1 -> "'${importedNames.first()}' Firestore'a kaydedildi."
+                            importedNames.size > 1 -> "${importedNames.size} PDF kaynağı Firestore'a kaydedildi."
+                            else -> state.statusBanner
+                        }
+                    )
+                }
+            } finally {
+                _uiState.update { it.copy(isPdfBusy = false, pdfImportProgressText = null) }
+            }
+        }
+    }
+
+    fun relinkPdfFile(context: Context, pdf: PdfResourceRecord, uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isPdfBusy = true,
+                    pdfError = null,
+                    pdfImportProgressText = "'${pdf.title}' dosya referansı güncelleniyor..."
+                )
+            }
+            try {
+                val displayName = resolveFileName(context, uri)
+                val info = PdfHelper.importPdfToAppStorage(context, uri, displayName)
+                PdfHelper.deleteLocalPdfIfOwned(context, pdf.localUriString)
+                val safeLastPage = pdf.lastStudiedPage.coerceIn(1L, info.pageCount.toLong())
+                repository.updatePdfSource(
+                    currentUserId,
+                    pdf.copy(
+                        localUriString = info.localPath,
+                        pageCount = info.pageCount.toLong(),
+                        lastStudiedPage = safeLastPage
+                    )
+                )
+                val bitmap = PdfHelper.renderPdfPage(info.localPath, (safeLastPage - 1).toInt())
+                _uiState.update {
+                    it.copy(
+                        activePdfId = pdf.id,
+                        activePdfPage = safeLastPage.toInt(),
+                        renderedPdfPage = bitmap,
+                        statusBanner = "'${pdf.title}' dosya referansı Firestore'da güncellendi."
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(pdfError = e.localizedMessage ?: "Dosya referansı güncellenemedi.")
+                }
+            } finally {
+                _uiState.update { it.copy(isPdfBusy = false, pdfImportProgressText = null) }
+            }
+        }
+    }
+
+    fun selectPdfAndLoadPage(pdf: PdfResourceRecord, pageNumber: Int = pdf.lastStudiedPage.toInt().coerceAtLeast(1)) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPdfBusy = true, pdfError = null, activePdfId = pdf.id) }
+            try {
+                val safePage = pageNumber.coerceIn(1, pdf.pageCount.toInt().coerceAtLeast(1))
+                val bitmap = PdfHelper.renderPdfPage(pdf.localUriString, safePage - 1)
+                _uiState.update { it.copy(activePdfPage = safePage, renderedPdfPage = bitmap) }
+                if (safePage.toLong() != pdf.lastStudiedPage) {
+                    repository.updatePdfSource(currentUserId, pdf.copy(lastStudiedPage = safePage.toLong()))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(pdfError = e.localizedMessage ?: "PDF sayfası açılamadı.") }
+            } finally {
+                _uiState.update { it.copy(isPdfBusy = false) }
+            }
+        }
+    }
+
+    fun renamePdf(pdf: PdfResourceRecord, newTitle: String, newSubject: String) {
+        viewModelScope.launch {
+            try {
+                repository.updatePdfSource(
+                    currentUserId,
+                    pdf.copy(
+                        title = newTitle.trim().ifBlank { pdf.title },
+                        subject = newSubject
+                    )
+                )
+                _uiState.update { it.copy(statusBanner = "PDF referansı Firestore'da güncellendi.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(pdfError = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun deletePdf(context: Context, pdf: PdfResourceRecord) {
+        viewModelScope.launch {
+            try {
+                repository.deletePdfSource(currentUserId, pdf.id)
+                PdfHelper.deleteLocalPdfIfOwned(context, pdf.localUriString)
+                if (_uiState.value.activePdfId == pdf.id) {
+                    _uiState.update { it.copy(activePdfId = null, renderedPdfPage = null) }
+                }
+                _uiState.update { it.copy(statusBanner = "'${pdf.title}' referansı silindi.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(pdfError = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun analyzeActivePdfAndSaveNote(saveAsNote: Boolean) {
+        val pdf = _uiState.value.activePdf ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPdfBusy = true, pdfError = null) }
+            try {
+                val samples = PdfHelper.renderPdfSamplePages(
+                    pdf.localUriString,
+                    _uiState.value.activePdfPage,
+                    maxPages = 4
+                )
+                val analysis = aiService.analyzePdfPages(
+                    pdfTitle = pdf.title,
+                    subject = pdf.subject,
+                    gradeLevel = _uiState.value.profile.gradeLevel,
+                    pageSamples = samples
+                )
+                repository.updatePdfSource(
+                    currentUserId,
+                    pdf.copy(summary = analysis.summary, topics = analysis.topics)
+                )
+                if (saveAsNote) {
+                    repository.addNote(
+                        currentUserId,
+                        StudyNote(
+                            title = "${pdf.title} - Ders Notu",
+                            subject = pdf.subject,
+                            content = analysis.summary,
+                            formulas = analysis.formulas,
+                            definitions = analysis.definitions,
+                            keyConcepts = analysis.keyConcepts,
+                            sourcePdfTitle = pdf.title
+                        )
+                    )
+                }
+                repository.awardProgress(
+                    userId = currentUserId,
+                    currentProfile = _uiState.value.profile,
+                    xpDelta = 25L,
+                    minutesDelta = 5L,
+                    newBadge = "PDF Araştırmacısı"
+                )
+                _uiState.update {
+                    it.copy(
+                        statusBanner = if (saveAsNote) {
+                            "PDF özetlendi ve Çalışma Notlarına kaydedildi."
+                        } else {
+                            "PDF analizi ve konu haritası güncellendi."
+                        }
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(pdfError = e.localizedMessage ?: "PDF analiz edilemedi.") }
+            } finally {
+                _uiState.update { it.copy(isPdfBusy = false) }
+            }
+        }
+    }
+
+    // --- Smart Exam System ---
+    fun startSmartExam(
+        subject: String,
+        topic: String,
+        difficulty: ExamDifficulty,
+        questionCount: Int,
+        sourceType: String,
+        selectedTypes: List<QuestionType>,
+        timedMinutes: Int,
+        pdfSource: PdfResourceRecord? = null,
+        focusWrongSummary: String? = null
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(examUiState = ExamUiState.Generating, examError = null) }
+            try {
+                val pdfSamples = if (pdfSource != null) {
+                    PdfHelper.renderPdfSamplePages(pdfSource.localUriString, _uiState.value.activePdfPage, maxPages = 3)
+                } else {
+                    emptyList()
+                }
+                val exam = aiService.generateExam(
+                    gradeLevel = _uiState.value.profile.gradeLevel,
+                    subject = subject,
+                    topic = topic.ifBlank { pdfSource?.title ?: subject },
+                    difficulty = difficulty,
+                    questionCount = questionCount,
+                    sourceType = sourceType,
+                    selectedTypes = selectedTypes.ifEmpty { listOf(QuestionType.MULTIPLE_CHOICE) },
+                    timedMinutes = timedMinutes,
+                    pdfSamples = pdfSamples,
+                    focusWrongQuestions = focusWrongSummary
+                )
+                _uiState.update {
+                    it.copy(
+                        examUiState = ExamUiState.InProgress(
+                            exam = exam,
+                            remainingSeconds = if (timedMinutes > 0) timedMinutes * 60 else 0
+                        )
+                    )
+                }
+                startExamTimer(timedMinutes > 0)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        examUiState = ExamUiState.Config,
+                        examError = e.localizedMessage ?: "Sınav oluşturulamadı."
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startExamTimer(hasCountdown: Boolean) {
+        examTimerJob?.cancel()
+        examTimerJob = viewModelScope.launch {
+            while (true) {
+                delay(1000L)
+                val current = _uiState.value.examUiState
+                if (current !is ExamUiState.InProgress) break
+                val nextElapsed = current.elapsedSeconds + 1
+                val nextRemaining = if (hasCountdown) (current.remainingSeconds - 1).coerceAtLeast(0) else 0
+                _uiState.update {
+                    it.copy(
+                        examUiState = current.copy(
+                            elapsedSeconds = nextElapsed,
+                            remainingSeconds = nextRemaining
+                        )
+                    )
+                }
+                if (hasCountdown && nextRemaining == 0) {
+                    submitExam()
+                    break
+                }
+            }
+        }
+    }
+
+    fun updateExamAnswer(questionNumber: Int, answer: String) {
+        val current = _uiState.value.examUiState as? ExamUiState.InProgress ?: return
+        _uiState.update {
+            it.copy(
+                examUiState = current.copy(
+                    answers = current.answers + (questionNumber to answer)
+                )
+            )
+        }
+    }
+
+    fun submitExam() {
+        val current = _uiState.value.examUiState as? ExamUiState.InProgress ?: return
+        examTimerJob?.cancel()
+        viewModelScope.launch {
+            _uiState.update { it.copy(examUiState = ExamUiState.Grading, examError = null) }
+            try {
+                val summary = aiService.evaluateExamAndAnalyzeErrors(
+                    exam = current.exam,
+                    answers = current.answers,
+                    durationSeconds = current.elapsedSeconds,
+                    gradeLevel = _uiState.value.profile.gradeLevel
+                )
+                repository.saveExamRecord(
+                    currentUserId,
+                    ExamRecord(
+                        title = summary.title,
+                        subject = summary.subject,
+                        topic = summary.topic,
+                        difficulty = summary.difficulty,
+                        questionCount = summary.totalCount.toLong(),
+                        correctCount = summary.correctCount.toLong(),
+                        scorePercent = summary.scorePercent.toLong(),
+                        durationSeconds = summary.durationSeconds.toLong(),
+                        sourceType = summary.sourceType,
+                        weakTopics = summary.weakTopics,
+                        errorCategories = summary.errorCategories,
+                        aiReport = summary.overallReport,
+                        wrongQuestionsSummary = summary.wrongQuestionsSummary
+                    )
+                )
+                repository.awardProgress(
+                    userId = currentUserId,
+                    currentProfile = _uiState.value.profile,
+                    xpDelta = (summary.scorePercent / 2 + 20).toLong(),
+                    minutesDelta = (summary.durationSeconds / 60).coerceAtLeast(2).toLong(),
+                    questionsDelta = summary.totalCount.toLong(),
+                    newBadge = if (summary.scorePercent >= 80) "Sınav Yıldızı" else null
+                )
+                _uiState.update { it.copy(examUiState = ExamUiState.Result(summary)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        examUiState = current,
+                        examError = e.localizedMessage ?: "Sınav değerlendirilemedi."
+                    )
+                }
+            }
+        }
+    }
+
+    fun resetExamToConfig() {
+        examTimerJob?.cancel()
+        _uiState.update { it.copy(examUiState = ExamUiState.Config, examError = null) }
+    }
+
+    // --- Study Plans ---
+    fun addManualStudyPlan(
+        subject: String,
+        topic: String,
+        dayLabel: String,
+        durationMinutes: Long,
+        priority: String,
+        planType: String,
+        examDateText: String
+    ) {
+        viewModelScope.launch {
+            try {
+                repository.addStudyPlanItem(
+                    currentUserId,
+                    StudyPlanItem(
+                        subject = subject,
+                        topic = topic,
+                        dayLabel = dayLabel,
+                        durationMinutes = durationMinutes,
+                        priority = priority,
+                        planType = planType,
+                        examDateText = examDateText
+                    )
+                )
+                _uiState.update { it.copy(statusBanner = "Çalışma planı eklendi.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun generateAiWeeklyPlan(focusSubject: String, examDateText: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isGeneratingPlan = true) }
+            try {
+                val weakTopics = _uiState.value.examHistory.flatMap { it.weakTopics }.distinct().take(6)
+                val items = aiService.generateStudyPlans(
+                    profile = _uiState.value.profile,
+                    weakTopics = weakTopics,
+                    examDateText = examDateText,
+                    focusSubject = focusSubject
+                )
+                items.forEach { repository.addStudyPlanItem(currentUserId, it) }
+                _uiState.update { it.copy(statusBanner = "Yapay zekâ destekli haftalık çalışma planın oluşturuldu.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = e.localizedMessage ?: "Plan oluşturulamadı.") }
+            } finally {
+                _uiState.update { it.copy(isGeneratingPlan = false) }
+            }
+        }
+    }
+
+    fun toggleStudyPlanComplete(item: StudyPlanItem) {
+        viewModelScope.launch {
+            try {
+                val nowComplete = !item.isCompleted
+                repository.updateStudyPlanItem(currentUserId, item.copy(isCompleted = nowComplete))
+                if (nowComplete) {
+                    repository.awardProgress(
+                        userId = currentUserId,
+                        currentProfile = _uiState.value.profile,
+                        xpDelta = 30L,
+                        minutesDelta = item.durationMinutes,
+                        newBadge = "Planlı Çalışkan"
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun postponeStudyPlan(item: StudyPlanItem) {
+        val nextDays = listOf("Bugün", "Yarın", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")
+        val idx = nextDays.indexOf(item.dayLabel)
+        val nextDay = if (idx >= 0) nextDays[(idx + 1) % nextDays.size] else "Yarın"
+        viewModelScope.launch {
+            try {
+                repository.updateStudyPlanItem(
+                    currentUserId,
+                    item.copy(
+                        dayLabel = nextDay,
+                        postponedCount = item.postponedCount + 1L,
+                        priority = "Yüksek"
+                    )
+                )
+                _uiState.update { it.copy(statusBanner = "'${item.topic}' $nextDay gününe yeniden planlandı.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun deleteStudyPlan(planId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteStudyPlanItem(currentUserId, planId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    // --- Smart Notes ---
+    fun generateAiNote(subject: String, topic: String, pdf: PdfResourceRecord? = null) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isGeneratingNote = true) }
+            try {
+                val samples = if (pdf != null) {
+                    PdfHelper.renderPdfSamplePages(pdf.localUriString, _uiState.value.activePdfPage, maxPages = 3)
+                } else emptyList()
+                val note = aiService.generateStructuredNote(
+                    subject = subject,
+                    topicOrPrompt = topic,
+                    gradeLevel = _uiState.value.profile.gradeLevel,
+                    pdfTitle = pdf?.title,
+                    pdfSamples = samples
+                )
+                repository.addNote(currentUserId, note)
+                _uiState.update { it.copy(statusBanner = "'${note.title}' notu oluşturuldu.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = e.localizedMessage ?: "Not oluşturulamadı.") }
+            } finally {
+                _uiState.update { it.copy(isGeneratingNote = false) }
+            }
+        }
+    }
+
+    fun saveManualOrEditedNote(note: StudyNote) {
+        viewModelScope.launch {
+            try {
+                if (note.id.isBlank()) {
+                    repository.addNote(currentUserId, note)
+                } else {
+                    repository.updateNote(currentUserId, note)
+                }
+                _uiState.update { it.copy(statusBanner = "Not kaydedildi.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun deleteNote(noteId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteNote(currentUserId, noteId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun exportNotePdf(context: Context, note: StudyNote) {
+        viewModelScope.launch {
+            try {
+                val file = PdfHelper.exportNoteAsPdf(context, note)
+                PdfHelper.sharePdfFile(context, file)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = "PDF dışa aktarılamadı: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    // --- Flashcards ---
+    fun generateAiFlashcards(subject: String, topic: String, pdf: PdfResourceRecord? = null) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isGeneratingCards = true) }
+            try {
+                val samples = if (pdf != null) {
+                    PdfHelper.renderPdfSamplePages(pdf.localUriString, _uiState.value.activePdfPage, maxPages = 3)
+                } else emptyList()
+                val cards = aiService.generateFlashcards(
+                    subject = subject,
+                    topic = topic,
+                    gradeLevel = _uiState.value.profile.gradeLevel,
+                    count = 5,
+                    pdfSamples = samples
+                )
+                cards.forEach { repository.addFlashcard(currentUserId, it) }
+                _uiState.update { it.copy(statusBanner = "${cards.size} adet bilgi kartı eklendi.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = e.localizedMessage ?: "Kartlar üretilemedi.") }
+            } finally {
+                _uiState.update { it.copy(isGeneratingCards = false) }
+            }
+        }
+    }
+
+    fun reviewFlashcard(card: FlashcardItem, learned: Boolean) {
+        viewModelScope.launch {
+            try {
+                repository.updateFlashcardReview(currentUserId, card, learned)
+                repository.awardProgress(
+                    userId = currentUserId,
+                    currentProfile = _uiState.value.profile,
+                    xpDelta = if (learned) 15L else 5L
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun deleteFlashcard(cardId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteFlashcard(currentUserId, cardId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    // --- Interactive Daily Tasks & Mini Quiz ---
+    fun toggleDailyTask(task: DailyLearningTask) {
+        viewModelScope.launch {
+            try {
+                val becomingDone = !task.isCompleted
+                repository.toggleDailyTask(currentUserId, task)
+                if (becomingDone) {
+                    repository.awardProgress(
+                        userId = currentUserId,
+                        currentProfile = _uiState.value.profile,
+                        xpDelta = task.xpReward,
+                        minutesDelta = 10L
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun loadMiniQuiz(subject: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMiniQuiz = true) }
+            try {
+                val qs = aiService.generateMiniQuiz(_uiState.value.profile.gradeLevel, subject)
+                _uiState.update { it.copy(miniQuizQuestions = qs) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = e.localizedMessage ?: "Mini yarışma yüklenemedi.") }
+            } finally {
+                _uiState.update { it.copy(isLoadingMiniQuiz = false) }
+            }
+        }
+    }
+
+    fun awardMiniQuizXp(correctCount: Int) {
+        viewModelScope.launch {
+            try {
+                repository.awardProgress(
+                    userId = currentUserId,
+                    currentProfile = _uiState.value.profile,
+                    xpDelta = (correctCount * 15L + 10L),
+                    questionsDelta = 3L,
+                    newBadge = if (correctCount == 3) "Bilgi Yarışması Şampiyonu" else null
+                )
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun resolveFileName(context: Context, uri: Uri): String {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) {
+                return cursor.getString(idx) ?: "PDF Kaynak"
+            }
+        }
+        return uri.lastPathSegment ?: "PDF Kaynak"
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        examTimerJob?.cancel()
+        messagesJob?.cancel()
+    }
+
+    private companion object {
+        const val TAG = "MrStudyViewModel"
+    }
+}

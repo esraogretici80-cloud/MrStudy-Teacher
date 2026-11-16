@@ -1,0 +1,215 @@
+{
+  "entities": {
+    "StudentProfile": {
+      "title": "StudentProfile",
+      "description": "Authenticated student profile, learning preferences, and gamification stats.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "Student display name" },
+        "email": { "type": "string", "description": "Student email address (PII, owner-only)" },
+        "gradeLevel": { "type": "string", "description": "Grade level or exam track in Turkish" },
+        "targetGoal": { "type": "string", "description": "Student academic target" },
+        "dailyGoalMinutes": { "type": "integer", "description": "Daily study goal in minutes" },
+        "xp": { "type": "integer", "description": "Accumulated experience points" },
+        "level": { "type": "integer", "description": "Current learning level" },
+        "streakDays": { "type": "integer", "description": "Consecutive study days" },
+        "totalStudyMinutes": { "type": "integer", "description": "Cumulative study minutes" },
+        "questionsSolved": { "type": "integer", "description": "Total questions solved" },
+        "darkThemeMode": { "type": "string", "enum": ["system", "light", "dark"] },
+        "preferredMode": { "type": "string", "description": "Default AI teaching mode" },
+        "badges": { "type": "array", "description": "Earned achievement badge IDs" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["userId", "displayName", "gradeLevel", "xp", "level", "createdAt", "updatedAt"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "A tutoring conversation session with MrStudy AI Teacher.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "teachingMode": { "type": "string" },
+        "explanationDepth": { "type": "string", "enum": ["kisa", "normal", "detayli"] },
+        "sourcePdfId": { "type": "string" },
+        "sourcePdfTitle": { "type": "string" },
+        "sourcePage": { "type": "integer" },
+        "messageCount": { "type": "integer" },
+        "lastMessagePreview": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "subject", "teachingMode", "explanationDepth", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Individual message inside a tutoring chat session.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string" },
+        "teachingMode": { "type": "string" },
+        "hasAttachment": { "type": "boolean" },
+        "attachmentLabel": { "type": "string" },
+        "sourceCitation": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "role", "content", "createdAt"]
+    },
+    "PdfResourceRecord": {
+      "title": "PdfResourceRecord",
+      "description": "Metadata and AI analysis summary for a locally stored PDF textbook/worksheet.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "localUriString": { "type": "string" },
+        "pageCount": { "type": "integer" },
+        "lastStudiedPage": { "type": "integer" },
+        "summary": { "type": "string" },
+        "topics": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "subject", "localUriString", "pageCount", "lastStudiedPage", "createdAt", "updatedAt"]
+    },
+    "ExamRecord": {
+      "title": "ExamRecord",
+      "description": "Completed smart exam result, score breakdown, and AI error analysis.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "questionCount": { "type": "integer" },
+        "correctCount": { "type": "integer" },
+        "scorePercent": { "type": "integer" },
+        "durationSeconds": { "type": "integer" },
+        "sourceType": { "type": "string" },
+        "weakTopics": { "type": "array" },
+        "errorCategories": { "type": "array" },
+        "aiReport": { "type": "string" },
+        "wrongQuestionsSummary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "subject", "topic", "difficulty", "questionCount", "correctCount", "scorePercent", "createdAt"]
+    },
+    "StudyPlanItem": {
+      "title": "StudyPlanItem",
+      "description": "Scheduled daily/weekly study block with completion and reschedule tracking.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "subject": { "type": "string" },
+        "topic": { "type": "string" },
+        "dayLabel": { "type": "string" },
+        "durationMinutes": { "type": "integer" },
+        "priority": { "type": "string" },
+        "planType": { "type": "string" },
+        "isCompleted": { "type": "boolean" },
+        "postponedCount": { "type": "integer" },
+        "examDateText": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "subject", "topic", "dayLabel", "durationMinutes", "isCompleted", "createdAt", "updatedAt"]
+    },
+    "StudyNote": {
+      "title": "StudyNote",
+      "description": "Structured study note with formulas, definitions, and key concepts.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "content": { "type": "string" },
+        "formulas": { "type": "array" },
+        "definitions": { "type": "array" },
+        "keyConcepts": { "type": "array" },
+        "sourcePdfTitle": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "subject", "content", "createdAt", "updatedAt"]
+    },
+    "FlashcardItem": {
+      "title": "FlashcardItem",
+      "description": "Spaced-repetition study flashcard (Q&A, Concept, Formula).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "subject": { "type": "string" },
+        "cardType": { "type": "string" },
+        "front": { "type": "string" },
+        "back": { "type": "string" },
+        "masteryStatus": { "type": "string", "enum": ["new", "review", "learned"] },
+        "reviewCount": { "type": "integer" },
+        "nextReviewAtMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "subject", "cardType", "front", "back", "masteryStatus", "createdAt", "updatedAt"]
+    },
+    "DailyLearningTask": {
+      "title": "DailyLearningTask",
+      "description": "Interactive daily learning quest with XP reward.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "xpReward": { "type": "integer" },
+        "dateKey": { "type": "string" },
+        "isCompleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "xpReward", "dateKey", "isCompleted", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/StudentProfile" },
+      "description": "Student profile and progress stats"
+    },
+    "/users/{userId}/chat_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ChatSession" },
+      "description": "AI teacher tutoring sessions"
+    },
+    "/users/{userId}/chat_sessions/{sessionId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages inside an AI teacher tutoring session"
+    },
+    "/users/{userId}/pdf_sources/{pdfId}": {
+      "schema": { "$ref": "#/entities/PdfResourceRecord" },
+      "description": "Uploaded PDF textbook and worksheet metadata"
+    },
+    "/users/{userId}/exams/{examId}": {
+      "schema": { "$ref": "#/entities/ExamRecord" },
+      "description": "Completed smart exams and AI error analysis reports"
+    },
+    "/users/{userId}/study_plans/{planId}": {
+      "schema": { "$ref": "#/entities/StudyPlanItem" },
+      "description": "Personalized study plan entries"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/StudyNote" },
+      "description": "Smart study notes and PDF extracts"
+    },
+    "/users/{userId}/flashcards/{cardId}": {
+      "schema": { "$ref": "#/entities/FlashcardItem" },
+      "description": "Spaced repetition flashcards"
+    },
+    "/users/{userId}/daily_tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/DailyLearningTask" },
+      "description": "Daily interactive learning tasks"
+    }
+  }
+}
