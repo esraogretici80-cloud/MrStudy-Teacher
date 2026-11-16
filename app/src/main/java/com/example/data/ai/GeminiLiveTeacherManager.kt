@@ -335,7 +335,8 @@ class GeminiLiveTeacherManager {
         teachingMode: TeachingMode,
         pdfTitle: String?,
         activePdfPage: Int?,
-        initialPdfBitmap: Bitmap?
+        initialPdfBitmap: Bitmap?,
+        onUserPageCommand: ((Int) -> Unit)? = null
     ) {
         val appContext = context.applicationContext
         stopSessionInternal(resetTranscripts = true)
@@ -427,7 +428,7 @@ class GeminiLiveTeacherManager {
                 }
 
                 val receiveJob = launch(Dispatchers.IO) {
-                    runReceiveLoop(session, queue, track)
+                    runReceiveLoop(session, queue, track, onUserPageCommand)
                 }
 
                 receiveJob.join()
@@ -1010,7 +1011,8 @@ class GeminiLiveTeacherManager {
     private suspend fun runReceiveLoop(
         session: LiveSession,
         queue: Channel<ByteArray>,
-        track: AudioTrack
+        track: AudioTrack,
+        onUserPageCommand: ((Int) -> Unit)?
     ) {
         val userTurnBuffer = StringBuilder()
         val teacherTurnBuffer = StringBuilder()
@@ -1047,7 +1049,13 @@ class GeminiLiveTeacherManager {
                     val inputText = message.inputTranscription?.text
                     if (!inputText.isNullOrBlank()) {
                         userTurnBuffer.append(inputText)
-                        _state.update { it.copy(liveUserTranscript = userTurnBuffer.toString().trim()) }
+                        val currentText = userTurnBuffer.toString()
+                        if (onUserPageCommand != null) {
+                            checkForPageCommand(currentText) { targetPage ->
+                                onUserPageCommand(targetPage)
+                            }
+                        }
+                        _state.update { it.copy(liveUserTranscript = currentText.trim()) }
                     }
 
                     val outputText = message.outputTranscription?.text
@@ -1307,6 +1315,19 @@ class GeminiLiveTeacherManager {
                 "Canlı ders istek kotasına ulaşıldı. Lütfen birkaç dakika sonra tekrar deneyin."
             }
             else -> error.localizedMessage ?: "Canlı ders oturumu başlatılamadı."
+        }
+    }
+
+    private fun checkForPageCommand(text: String, onPageFound: (Int) -> Unit) {
+        val cleaned = text.lowercase(java.util.Locale.ROOT)
+        val regex = Regex("(?:sayfa|sayfaya|git|aç|sayfasi|sayfası)\\D*(\\d+)|(\\d+)\\D*(?:\\.?\\s*sayfa|sayfaya)")
+        val match = regex.find(cleaned)
+        if (match != null) {
+            val numStr = match.groupValues[1].ifBlank { match.groupValues[2] }
+            val pageNum = numStr.toIntOrNull()
+            if (pageNum != null && pageNum in 1..10000) {
+                onPageFound(pageNum)
+            }
         }
     }
 

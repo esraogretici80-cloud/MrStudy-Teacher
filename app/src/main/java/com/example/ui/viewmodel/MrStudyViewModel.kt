@@ -1238,7 +1238,10 @@ class MrStudyViewModel(
             teachingMode = state.selectedMode,
             pdfTitle = activePdf?.title,
             activePdfPage = if (activePdf != null) state.activePdfPage else null,
-            initialPdfBitmap = if (activePdf != null) state.renderedPdfPage else null
+            initialPdfBitmap = if (activePdf != null) state.renderedPdfPage else null,
+            onUserPageCommand = { targetPage ->
+                jumpLiveToPdfPage(targetPage)
+            }
         )
     }
 
@@ -1341,6 +1344,47 @@ class MrStudyViewModel(
                 throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(pdfError = "Sayfa değiştirilemedi: ${e.localizedMessage}") }
+            } finally {
+                _uiState.update { it.copy(isPdfBusy = false) }
+            }
+        }
+    }
+
+    fun jumpLiveToPdfPage(targetPage: Int) {
+        val state = _uiState.value
+        val activePdf = state.activePdf ?: return
+        val maxPages = activePdf.pageCount.toInt().coerceAtLeast(1)
+        val safePage = targetPage.coerceIn(1, maxPages)
+        if (safePage == state.activePdfPage) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPdfBusy = true) }
+            try {
+                val bitmap = PdfHelper.renderPdfPage(activePdf.localUriString, safePage - 1, maxWidthPx = 960)
+                _uiState.update {
+                    it.copy(
+                        activePdfPage = safePage,
+                        renderedPdfPage = bitmap,
+                        statusBanner = "${activePdf.title}: $safePage. sayfaya sesli komutla geçildi"
+                    )
+                }
+                repository.updatePdfSource(currentUserId, activePdf.copy(lastStudiedPage = safePage.toLong()))
+
+                if (liveManager.state.value.isSessionActive) {
+                    if (bitmap != null) {
+                        liveManager.sendVisualContextDuringLive(
+                            bitmap = bitmap,
+                            label = "${activePdf.title} s.$safePage",
+                            promptText = "Öğrenci sesli komutla $safePage. sayfaya geçti. Bu yeni sayfadaki konuyu ve soruları inceleyip anlat."
+                        )
+                    } else {
+                        liveManager.sendTextDuringLive("Öğrenci ${activePdf.title} dökümanında $safePage. sayfaya geçti.")
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(pdfError = "Sayfaya geçilemedi: ${e.localizedMessage}") }
             } finally {
                 _uiState.update { it.copy(isPdfBusy = false) }
             }
