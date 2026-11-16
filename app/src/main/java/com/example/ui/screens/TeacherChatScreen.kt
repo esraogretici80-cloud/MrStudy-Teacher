@@ -110,7 +110,8 @@ fun TeacherChatScreen(
     onSendMessage: (String, Boolean) -> Unit,
     onCancelStreaming: () -> Unit,
     onDismissError: () -> Unit,
-    onOpenLiveLesson: () -> Unit
+    onOpenLiveLesson: () -> Unit,
+    onOpenAppCheckSetup: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -337,44 +338,10 @@ fun TeacherChatScreen(
 
                     val debugToken = state.teacherAppCheckToken
                     if (!debugToken.isNullOrBlank()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = debugToken,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                FilledTonalButton(
-                                    onClick = {
-                                        clipboardManager.setText(AnnotatedString(debugToken))
-                                        copiedToken = true
-                                    },
-                                    modifier = Modifier.testTag("copy_debug_token_button")
-                                ) {
-                                    Icon(
-                                        Icons.Default.ContentCopy,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(if (copiedToken) "Kopyalandı" else "Debug Token'ı Kopyala")
-                                }
-                            }
-                        }
+                        AppCheckTokenQuickCard(
+                            debugToken = debugToken,
+                            onOpenSetupDialog = onOpenAppCheckSetup
+                        )
                     }
                 }
             }

@@ -125,7 +125,8 @@ fun LiveLessonScreen(
     onSendLiveImageUri: (Uri) -> Unit,
     onSendActivePdfPage: () -> Unit,
     onSaveTranscriptAsNote: () -> Unit,
-    onDismissError: () -> Unit
+    onDismissError: () -> Unit,
+    onOpenAppCheckSetup: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -325,37 +326,10 @@ fun LiveLessonScreen(
                     }
                     val token = liveState.debugAppCheckToken
                     if (!token.isNullOrBlank()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = token,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                FilledTonalButton(
-                                    onClick = {
-                                        clipboardManager.setText(AnnotatedString(token))
-                                        copiedToken = true
-                                    }
-                                ) {
-                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(if (copiedToken) "Kopyalandı" else "Debug Token'ı Kopyala")
-                                }
-                            }
-                        }
+                        AppCheckTokenQuickCard(
+                            debugToken = token,
+                            onOpenSetupDialog = onOpenAppCheckSetup
+                        )
                     }
                 }
             }

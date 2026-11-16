@@ -120,7 +120,7 @@ class MrStudyAiService {
                 chainMessages.contains("Exchange failed", ignoreCase = true) ||
                 chainMessages.contains("403", ignoreCase = true) -> {
                 IllegalStateException(
-                    "Firebase App Check doğrulaması reddedildi (403): Bu cihazdaki debug APK token'ı henüz Firebase Console'a kayıtlı olmayabilir. Aşağıdaki Debug Token'ı kopyalayıp Firebase Console > App Check bölümüne ekleyebilirsiniz. ($chainMessages)",
+                    "Firebase App Check doğrulaması reddedildi (403): Bu cihazdaki Debug Token henüz Firebase Console'a kayıtlı değil. Aşağıdan token'ı kopyalayıp Firebase Console > App Check > Manage debug tokens bölümüne ekleyerek doğrulayabilirsiniz.",
                     error
                 )
             }

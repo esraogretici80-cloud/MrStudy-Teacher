@@ -12,6 +12,7 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import com.example.core.getLocalAppCheckDebugToken
+import com.example.core.isAppCheckErrorMessage
 import com.example.data.model.StudentProfile
 import com.example.data.model.TeachingMode
 import com.google.firebase.Firebase
@@ -266,10 +267,11 @@ class GeminiLiveTeacherManager {
             } catch (e: Exception) {
                 Log.e(TAG, "Gemini Live session failed", e)
                 val mappedMsg = mapLiveErrorMessage(e)
-                val isAppCheck = mappedMsg.contains("App Check", ignoreCase = true) ||
-                    mappedMsg.contains("403", ignoreCase = true) ||
-                    mappedMsg.contains("token", ignoreCase = true)
-                val debugToken = if (isAppCheck) getLocalAppCheckDebugToken(appContext) else null
+                val debugToken = if (isAppCheckErrorMessage(mappedMsg)) {
+                    getLocalAppCheckDebugToken(appContext)
+                } else {
+                    null
+                }
                 _state.update {
                     it.copy(
                         status = LiveConnectionStatus.ERROR,
@@ -401,10 +403,14 @@ class GeminiLiveTeacherManager {
             throw e
         } catch (primaryErr: Exception) {
             val msg = primaryErr.message.orEmpty()
-            val shouldFallback = msg.contains("not found", ignoreCase = true) ||
-                msg.contains("unsupported", ignoreCase = true) ||
-                msg.contains("model", ignoreCase = true) ||
-                msg.contains("404", ignoreCase = true)
+            val isAuthOrAppCheck = isAppCheckErrorMessage(msg) ||
+                msg.contains("PERMISSION_DENIED", ignoreCase = true)
+            val shouldFallback = !isAuthOrAppCheck && (
+                msg.contains("not found", ignoreCase = true) ||
+                    msg.contains("unsupported", ignoreCase = true) ||
+                    msg.contains("model", ignoreCase = true) ||
+                    msg.contains("404", ignoreCase = true)
+                )
             if (!shouldFallback) throw primaryErr
 
             Log.w(TAG, "Primary Live model unavailable, trying fallback model", primaryErr)
@@ -790,11 +796,9 @@ class GeminiLiveTeacherManager {
             .mapNotNull { it.message ?: it.localizedMessage }
             .joinToString(" | ")
         return when {
-            chain.contains("App Check", ignoreCase = true) ||
-                chain.contains("appcheck", ignoreCase = true) ||
-                chain.contains("403", ignoreCase = true) ||
-                chain.contains("attestation", ignoreCase = true) -> {
-                "Firebase App Check doğrulaması reddedildi (403). Sideload edilmiş debug APK kullanıyorsanız aşağıdaki Debug Token'ı kopyalayıp Firebase Console > App Check bölümüne ekleyebilirsiniz. ($chain)"
+            isAppCheckErrorMessage(chain) ||
+                chain.contains("PERMISSION_DENIED", ignoreCase = true) -> {
+                "Firebase App Check doğrulaması reddedildi (403). Bu cihazdaki Debug Token henüz Firebase Console'a kayıtlı değil. Aşağıdan token'ı kopyalayıp Firebase Console > App Check > Manage debug tokens bölümüne ekleyerek Canlı Ders ve Normal Modu hemen açabilirsiniz."
             }
             error is IOException ||
                 chain.contains("network", ignoreCase = true) ||

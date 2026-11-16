@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.friendlyFirestoreErrorMessage
 import com.example.core.getLocalAppCheckDebugToken
+import com.example.core.isAppCheckErrorMessage
 import com.example.data.ai.GeminiLiveTeacherManager
 import com.example.data.ai.LiveLessonUiState
 import com.example.data.ai.MrStudyAiService
@@ -508,11 +509,11 @@ class MrStudyViewModel(
             } catch (e: Exception) {
                 Log.e(TAG, "Failed sending message", e)
                 val msg = e.localizedMessage ?: "Öğretmen yanıtı alınamadı."
-                val isAppCheckIssue = msg.contains("App Check", ignoreCase = true) ||
-                    msg.contains("appcheck", ignoreCase = true) ||
-                    msg.contains("403", ignoreCase = true) ||
-                    msg.contains("token", ignoreCase = true)
-                val debugToken = if (isAppCheckIssue) getLocalAppCheckDebugToken(appContext) else null
+                val debugToken = if (isAppCheckErrorMessage(msg)) {
+                    getLocalAppCheckDebugToken(appContext)
+                } else {
+                    null
+                }
                 _uiState.update {
                     it.copy(
                         teacherError = msg,

@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -43,7 +44,8 @@ fun StudentProfileDialog(
     isOnboarding: Boolean,
     onDismiss: () -> Unit,
     onSave: (displayName: String, gradeLevel: String, targetGoal: String, dailyGoalMinutes: Long, darkThemeMode: String) -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onOpenAppCheckSetup: () -> Unit = {}
 ) {
     var displayName by remember(profile) { mutableStateOf(profile.displayName) }
     var selectedGrade by remember(profile) { mutableStateOf(profile.gradeLevel) }
@@ -132,6 +134,15 @@ fun StudentProfileDialog(
 
                 if (!isOnboarding) {
                     Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = onOpenAppCheckSetup,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_appcheck_setup_button")
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null)
+                        Text("  App Check Cihaz Doğrulaması")
+                    }
                     OutlinedButton(
                         onClick = onSignOut,
                         modifier = Modifier

@@ -64,6 +64,7 @@ import com.example.core.signOutUser
 import com.example.data.ai.MrStudyAiService
 import com.example.data.model.PdfResourceRecord
 import com.example.data.repository.MrStudyRepository
+import com.example.ui.screens.AppCheckSetupDialog
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.ExamCenterScreen
@@ -162,6 +163,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
 
     val snackbarHostState = remember { SnackbarHostState() }
     var preselectedExamPdf by remember { mutableStateOf<PdfResourceRecord?>(null) }
+    var showAppCheckSetupDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.statusBanner) {
         val msg = state.statusBanner
@@ -283,7 +285,8 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     },
                                     onCancelStreaming = viewModel::cancelTeacherStream,
                                     onDismissError = viewModel::dismissTeacherError,
-                                    onOpenLiveLesson = { navController.navigate("live_lesson") }
+                                    onOpenLiveLesson = { navController.navigate("live_lesson") },
+                                    onOpenAppCheckSetup = { showAppCheckSetupDialog = true }
                                 )
                             }
 
@@ -301,7 +304,8 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onSendLiveImageUri = { uri -> viewModel.sendLiveImageUri(context, uri) },
                                     onSendActivePdfPage = viewModel::sendActivePdfPageToLive,
                                     onSaveTranscriptAsNote = viewModel::saveLiveTranscriptAsNote,
-                                    onDismissError = viewModel::dismissLiveError
+                                    onDismissError = viewModel::dismissLiveError,
+                                    onOpenAppCheckSetup = { showAppCheckSetupDialog = true }
                                 )
                             }
 
@@ -389,6 +393,20 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
             onSignOut = {
                 viewModel.setProfileSheetVisible(false)
                 signOutUser(credentialManager, scope)
+            },
+            onOpenAppCheckSetup = {
+                viewModel.setProfileSheetVisible(false)
+                showAppCheckSetupDialog = true
+            }
+        )
+    }
+
+    if (showAppCheckSetupDialog) {
+        AppCheckSetupDialog(
+            onDismiss = { showAppCheckSetupDialog = false },
+            onVerifiedSuccess = {
+                viewModel.dismissTeacherError()
+                viewModel.dismissLiveError()
             }
         )
     }
