@@ -57,13 +57,18 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.ui.graphics.asImageBitmap
 import com.example.data.model.PdfResourceRecord
@@ -77,6 +82,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -164,7 +170,8 @@ fun LiveLessonScreen(
     var showPermissionDeniedCard by remember { mutableStateOf(false) }
     var showSubjectMenu by remember { mutableStateOf(false) }
     var showPdfMenu by remember { mutableStateOf(false) }
-    var isPdfPreviewExpanded by remember { mutableStateOf(false) }
+    var isPdfPreviewModalOpen by remember { mutableStateOf(false) }
+    var isTextInputVisible by remember { mutableStateOf(false) }
     var quickInputText by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var copiedToken by remember(liveState.debugAppCheckToken) { mutableStateOf(false) }
