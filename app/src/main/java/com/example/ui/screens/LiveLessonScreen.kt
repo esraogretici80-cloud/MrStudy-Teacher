@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -44,7 +45,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import android.os.Build
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -53,25 +53,17 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.ui.graphics.asImageBitmap
-import com.example.data.model.PdfResourceRecord
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -82,12 +74,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -98,22 +88,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -123,6 +110,7 @@ import com.example.R
 import com.example.data.ai.LiveConnectionStatus
 import com.example.data.ai.LiveLessonUiState
 import com.example.data.ai.LiveTranscriptEntry
+import com.example.data.model.PdfResourceRecord
 import com.example.data.model.SubjectCatalog
 import com.example.ui.state.MrStudyUiState
 import java.io.File
@@ -150,7 +138,6 @@ fun LiveLessonScreen(
     onOpenAppCheckSetup: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
     var hasMicPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -170,11 +157,9 @@ fun LiveLessonScreen(
     var showPermissionDeniedCard by remember { mutableStateOf(false) }
     var showSubjectMenu by remember { mutableStateOf(false) }
     var showPdfMenu by remember { mutableStateOf(false) }
-    var isPdfPreviewModalOpen by remember { mutableStateOf(false) }
-    var isTextInputVisible by remember { mutableStateOf(false) }
+    var isPdfPreviewExpanded by remember { mutableStateOf(false) }
     var quickInputText by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
-    var copiedToken by remember(liveState.debugAppCheckToken) { mutableStateOf(false) }
 
     val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -254,37 +239,46 @@ fun LiveLessonScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top Live Classroom Bar
+        // Top Live Classroom Bar (Clean, non-colliding layout)
         Surface(
             tonalElevation = 2.dp,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     IconButton(
                         onClick = {
                             if (liveState.isSessionActive) onStopLiveSession()
                             onBack()
                         },
-                        modifier = Modifier.testTag("live_back_button")
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("live_back_button")
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Geri Dön"
                         )
                     }
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Text(
-                                text = "Gemini Live Ders",
-                                style = MaterialTheme.typography.titleMedium,
+                                text = "Gemini Live",
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1
                             )
@@ -305,8 +299,10 @@ fun LiveLessonScreen(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
+                    // Audio route chip (BT / Speaker)
                     AssistChip(
                         onClick = {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission) {
@@ -319,13 +315,13 @@ fun LiveLessonScreen(
                             Icon(
                                 imageVector = if (liveState.isBluetoothHeadsetConnected) Icons.Default.Headphones else Icons.Default.VolumeUp,
                                 contentDescription = null,
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(14.dp),
                                 tint = if (liveState.isBluetoothHeadsetConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         label = {
                             Text(
-                                text = if (liveState.isBluetoothHeadsetConnected) "BT Kulaklık" else "Hoparlör",
+                                text = if (liveState.isBluetoothHeadsetConnected) "BT" else "Hoparlör",
                                 style = MaterialTheme.typography.labelSmall
                             )
                         },
@@ -339,10 +335,11 @@ fun LiveLessonScreen(
                         modifier = Modifier.testTag("live_audio_route_chip")
                     )
 
+                    // Subject selector dropdown
                     Box {
                         AssistChip(
                             onClick = { if (!liveState.isSessionActive) showSubjectMenu = true },
-                            label = { Text(appState.selectedSubject, maxLines = 1) },
+                            label = { Text(appState.selectedSubject, maxLines = 1, style = MaterialTheme.typography.labelSmall) },
                             enabled = !liveState.isSessionActive
                         )
                         DropdownMenu(
@@ -364,12 +361,15 @@ fun LiveLessonScreen(
                     if (liveState.transcriptItems.isNotEmpty() && !liveState.isSessionActive) {
                         IconButton(
                             onClick = onSaveTranscriptAsNote,
-                            modifier = Modifier.testTag("save_live_note_button")
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("save_live_note_button")
                         ) {
                             Icon(
                                 Icons.Default.BookmarkAdd,
                                 contentDescription = "Dersi Notlara Kaydet",
-                                tint = MaterialTheme.colorScheme.primary
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -384,8 +384,8 @@ fun LiveLessonScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -419,14 +419,14 @@ fun LiveLessonScreen(
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.MicOff, contentDescription = null)
+                    Icon(Icons.Default.MicOff, contentDescription = null, modifier = Modifier.size(20.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Mikrofon İzni Gerekli", style = MaterialTheme.typography.titleSmall)
                         Text(
@@ -441,94 +441,235 @@ fun LiveLessonScreen(
             }
         }
 
-        // Animated Live Voice Orb + Voice Config Stage
-        LiveAcousticOrbStage(
-            status = liveState.status,
-            userLevel = liveState.userAudioLevel,
-            teacherLevel = liveState.teacherAudioLevel,
-            statusNotice = liveState.statusNotice,
-            selectedVoice = liveState.selectedVoice,
-            echoGuardEnabled = liveState.echoGuardEnabled,
-            isSessionActive = liveState.isSessionActive,
-            activePdfTitle = appState.activePdf?.title,
-            activePdfPage = appState.activePdfPage,
-            onSelectVoice = onSelectVoice,
-            onToggleEchoGuard = onToggleEchoGuard
-        )
+        // Unified Scrollable Stage & Transcripts (LazyColumn handles everything cleanly without overlap)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // 1. Animated Live Voice Orb & Voice Stage
+            item {
+                LiveAcousticOrbStage(
+                    status = liveState.status,
+                    userLevel = liveState.userAudioLevel,
+                    teacherLevel = liveState.teacherAudioLevel,
+                    statusNotice = liveState.statusNotice,
+                    selectedVoice = liveState.selectedVoice,
+                    echoGuardEnabled = liveState.echoGuardEnabled,
+                    isSessionActive = liveState.isSessionActive,
+                    activePdfTitle = appState.activePdf?.title,
+                    activePdfPage = appState.activePdfPage,
+                    onSelectVoice = onSelectVoice,
+                    onToggleEchoGuard = onToggleEchoGuard
+                )
+            }
 
-        // Live PDF Pagination & Document Controller
-        val currentPdf = appState.activePdf
-        if (currentPdf != null) {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .testTag("live_pdf_control_card")
-            ) {
-                Column(
-                    modifier = Modifier.padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+            // 2. PDF Pagination & Document Controller Bar (if attached)
+            val currentPdf = appState.activePdf
+            if (currentPdf != null) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("live_pdf_control_card")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                shape = CircleShape,
-                                modifier = Modifier.size(32.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.Description,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = currentPdf.title,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "Canlı derse bağlı PDF kaynağı",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Box {
+                                    TextButton(
+                                        onClick = { showPdfMenu = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Değiştir", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    DropdownMenu(
+                                        expanded = showPdfMenu,
+                                        onDismissRequest = { showPdfMenu = false }
+                                    ) {
+                                        appState.pdfSources.forEach { pdf ->
+                                            DropdownMenuItem(
+                                                text = { Text(pdf.title) },
+                                                onClick = {
+                                                    onSelectPdfForLive(pdf)
+                                                    showPdfMenu = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // < > Page Stepper Bar
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surface,
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                IconButton(
+                                    onClick = { onChangeLivePdfPage(-1) },
+                                    enabled = appState.activePdfPage > 1 && !appState.isPdfBusy,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .testTag("live_pdf_prev_page")
+                                ) {
                                     Icon(
-                                        Icons.Default.Description,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.primary
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Önceki Sayfa (<)",
+                                        tint = if (appState.activePdfPage > 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    )
+                                }
+
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            text = "Sayfa ${appState.activePdfPage} / ${currentPdf.pageCount}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (appState.isPdfBusy) {
+                                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                        }
+                                    }
+                                    Text(
+                                        text = if (liveState.isSessionActive) "Öğretmen bu sayfayı görüyor" else "Ders başladığında gösterilir",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { onChangeLivePdfPage(1) },
+                                    enabled = appState.activePdfPage < currentPdf.pageCount && !appState.isPdfBusy,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .testTag("live_pdf_next_page")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = "Sonraki Sayfa (>)",
+                                        tint = if (appState.activePdfPage < currentPdf.pageCount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     )
                                 }
                             }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = currentPdf.title,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Canlı derse bağlı PDF kaynağı",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+
+                            // Expandable Page Preview
+                            if (appState.renderedPdfPage != null) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { isPdfPreviewExpanded = !isPdfPreviewExpanded }
+                                        .padding(vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = if (isPdfPreviewExpanded) "Sayfa önizlemesini gizle" else "Sayfa önizlemesini göster",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Icon(
+                                        imageVector = if (isPdfPreviewExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                AnimatedVisibility(visible = isPdfPreviewExpanded) {
+                                    Image(
+                                        bitmap = appState.renderedPdfPage.asImageBitmap(),
+                                        contentDescription = "PDF Sayfa Önizleme",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 180.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                }
                             }
                         }
-
+                    }
+                }
+            } else if (appState.pdfSources.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
                         Box {
-                            TextButton(
+                            AssistChip(
                                 onClick = { showPdfMenu = true },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Değiştir", style = MaterialTheme.typography.labelSmall)
-                            }
+                                leadingIcon = {
+                                    Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("📄 Canlı Derse PDF Bağla (${appState.pdfSources.size} kaynak)") },
+                                modifier = Modifier.testTag("live_bind_pdf_chip")
+                            )
                             DropdownMenu(
                                 expanded = showPdfMenu,
                                 onDismissRequest = { showPdfMenu = false }
                             ) {
                                 appState.pdfSources.forEach { pdf ->
                                     DropdownMenuItem(
-                                        text = { Text(pdf.title) },
+                                        text = { Text("${pdf.title} (${pdf.pageCount} sayfa)") },
                                         onClick = {
                                             onSelectPdfForLive(pdf)
                                             showPdfMenu = false
@@ -538,147 +679,10 @@ fun LiveLessonScreen(
                             }
                         }
                     }
-
-                    // < > Page Stepper Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = MaterialTheme.colorScheme.surface,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        IconButton(
-                            onClick = { onChangeLivePdfPage(-1) },
-                            enabled = appState.activePdfPage > 1 && !appState.isPdfBusy,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .testTag("live_pdf_prev_page")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Önceki Sayfa (<)",
-                                tint = if (appState.activePdfPage > 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            )
-                        }
-
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "Sayfa ${appState.activePdfPage} / ${currentPdf.pageCount}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                if (appState.isPdfBusy) {
-                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                }
-                            }
-                            Text(
-                                text = if (liveState.isSessionActive) "Öğretmen bu sayfayı görüyor" else "Ders başladığında gösterilir",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { onChangeLivePdfPage(1) },
-                            enabled = appState.activePdfPage < currentPdf.pageCount && !appState.isPdfBusy,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .testTag("live_pdf_next_page")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Sonraki Sayfa (>)",
-                                tint = if (appState.activePdfPage < currentPdf.pageCount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            )
-                        }
-                    }
-
-                    // Expandable Page Preview
-                    if (appState.renderedPdfPage != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { isPdfPreviewExpanded = !isPdfPreviewExpanded }
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = if (isPdfPreviewExpanded) "Sayfa önizlemesini gizle" else "Sayfa önizlemesini göster",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Icon(
-                                imageVector = if (isPdfPreviewExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        AnimatedVisibility(visible = isPdfPreviewExpanded) {
-                            Image(
-                                bitmap = appState.renderedPdfPage.asImageBitmap(),
-                                contentDescription = "PDF Sayfa Önizleme",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 180.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
-                                contentScale = ContentScale.Fit
-                            )
-                        }
-                    }
                 }
             }
-        } else if (appState.pdfSources.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Box {
-                    AssistChip(
-                        onClick = { showPdfMenu = true },
-                        leadingIcon = {
-                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("📄 Canlı Derse PDF Bağla (${appState.pdfSources.size} kaynak)") },
-                        modifier = Modifier.testTag("live_bind_pdf_chip")
-                    )
-                    DropdownMenu(
-                        expanded = showPdfMenu,
-                        onDismissRequest = { showPdfMenu = false }
-                    ) {
-                        appState.pdfSources.forEach { pdf ->
-                            DropdownMenuItem(
-                                text = { Text("${pdf.title} (${pdf.pageCount} sayfa)") },
-                                onClick = {
-                                    onSelectPdfForLive(pdf)
-                                    showPdfMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
 
-        // Live Scrolling Transcripts
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+            // 3. Intro card if empty
             if (liveState.transcriptItems.isEmpty() &&
                 liveState.liveUserTranscript.isBlank() &&
                 liveState.liveTeacherTranscript.isBlank()
@@ -686,7 +690,7 @@ fun LiveLessonScreen(
                 item {
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
                         ),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -701,7 +705,7 @@ fun LiveLessonScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "Alttaki Başlat düğmesine dokunduğunda MrStudy öğretmeninle telefon görüşmesi gibi akıcı konuşabilir, istediğin an sözünü kesip soru sorabilir veya defter/PDF sayfanı göstererek anlık anlatım alabilirsin.",
+                                text = "Alttaki Başlat düğmesine dokunduğunda MrStudy öğretmeninle telefon görüşmesi gibi akıcı konuşabilir, istediğin an sözünü kesip soru sorabilir veya PDF sayfanı göstererek anlık anlatım alabilirsin.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -710,6 +714,7 @@ fun LiveLessonScreen(
                 }
             }
 
+            // 4. Transcript Bubbles
             items(liveState.transcriptItems, key = { it.id }) { entry ->
                 LiveTranscriptBubble(entry = entry)
             }
@@ -741,121 +746,131 @@ fun LiveLessonScreen(
             }
         }
 
-        // Multimodal / Quick Action Strip when Connected
+        // Multimodal / Quick Action Strip when Connected (Fixed above bottom controls)
         if (liveState.isSessionActive && liveState.status != LiveConnectionStatus.CONNECTING) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Surface(
+                tonalElevation = 1.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                if (appState.activePdf != null) {
-                    AssistChip(
-                        onClick = onSendActivePdfPage,
-                        leadingIcon = {
-                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("PDF s.${appState.activePdfPage} Göster") },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        ),
-                        modifier = Modifier.testTag("live_send_pdf_button")
-                    )
-                }
-
-                AssistChip(
-                    onClick = {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
-                    label = { Text("Soru Görseli Göster") }
-                )
-
-                AssistChip(
-                    onClick = {
-                        val cameraDir = File(context.cacheDir, "camera").apply { mkdirs() }
-                        val photoFile = File(cameraDir, "live_soru_${System.currentTimeMillis()}.jpg")
-                        val uri = FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
-                            photoFile
-                        )
-                        pendingCameraUri = uri
-                        cameraLauncher.launch(uri)
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
-                    label = { Text("Kameradan Çek") }
-                )
-
-                listOf(
-                    "Biraz daha yavaş anlat",
-                    "Örnek soru sor",
-                    "Günlük hayattan örnek ver",
-                    "Kısaca özetle"
-                ).forEach { prompt ->
-                    AssistChip(
-                        onClick = { onSendLiveText(prompt) },
-                        label = { Text(prompt, style = MaterialTheme.typography.labelSmall) }
-                    )
-                }
-            }
-
-            // Optional silent text bar during live voice call
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = quickInputText,
-                    onValueChange = { quickInputText = it },
-                    placeholder = { Text("Canlı derse yazılı soru veya formül yaz...") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(
-                    onClick = {
-                        val t = quickInputText.trim()
-                        if (t.isNotBlank()) {
-                            quickInputText = ""
-                            onSendLiveText(t)
-                        }
-                    },
-                    enabled = quickInputText.isNotBlank(),
+                Column(
                     modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Canlı Mesaj Gönder",
-                        tint = MaterialTheme.colorScheme.onPrimary
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (appState.activePdf != null) {
+                            AssistChip(
+                                onClick = onSendActivePdfPage,
+                                leadingIcon = {
+                                    Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("PDF s.${appState.activePdfPage} Göster") },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                ),
+                                modifier = Modifier.testTag("live_send_pdf_button")
+                            )
+                        }
+
+                        AssistChip(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = { Text("Soru Görseli Göster") }
+                        )
+
+                        AssistChip(
+                            onClick = {
+                                val cameraDir = File(context.cacheDir, "camera").apply { mkdirs() }
+                                val photoFile = File(cameraDir, "live_soru_${System.currentTimeMillis()}.jpg")
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    photoFile
+                                )
+                                pendingCameraUri = uri
+                                cameraLauncher.launch(uri)
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = { Text("Kameradan Çek") }
+                        )
+
+                        listOf(
+                            "Biraz daha yavaş anlat",
+                            "Örnek soru sor",
+                            "Günlük hayattan örnek ver",
+                            "Kısaca özetle"
+                        ).forEach { prompt ->
+                            AssistChip(
+                                onClick = { onSendLiveText(prompt) },
+                                label = { Text(prompt, style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+
+                    // Optional silent text bar during live voice call
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = quickInputText,
+                            onValueChange = { quickInputText = it },
+                            placeholder = { Text("Canlı derse yazılı soru veya formül yaz...") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                val t = quickInputText.trim()
+                                if (t.isNotBlank()) {
+                                    quickInputText = ""
+                                    onSendLiveText(t)
+                                }
+                            },
+                            enabled = quickInputText.isNotBlank(),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Canlı Mesaj Gönder",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        // Bottom Call Controls Bar
+        // Bottom Call Controls Bar (Fixed at very bottom)
         Surface(
-            tonalElevation = 4.dp,
+            tonalElevation = 6.dp,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -865,7 +880,7 @@ fun LiveLessonScreen(
                         onClick = onInterruptTeacher,
                         shape = CircleShape,
                         modifier = Modifier
-                            .height(54.dp)
+                            .height(52.dp)
                             .testTag("live_interrupt_button")
                     ) {
                         Icon(
@@ -881,7 +896,7 @@ fun LiveLessonScreen(
                         enabled = liveState.isSessionActive && liveState.status != LiveConnectionStatus.CONNECTING,
                         shape = CircleShape,
                         modifier = Modifier
-                            .height(54.dp)
+                            .height(52.dp)
                             .testTag("live_mute_button")
                     ) {
                         Icon(
@@ -915,7 +930,7 @@ fun LiveLessonScreen(
                     ),
                     shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
-                        .height(58.dp)
+                        .height(56.dp)
                         .testTag("live_call_toggle_button")
                 ) {
                     if (liveState.status == LiveConnectionStatus.CONNECTING) {
@@ -967,7 +982,7 @@ private fun LiveStatusPill(status: LiveConnectionStatus, elapsedSeconds: Int) {
             color = fg,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
     }
 }
@@ -1010,18 +1025,18 @@ private fun LiveAcousticOrbStage(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(164.dp)
+            modifier = Modifier.size(150.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val center = Offset(size.width / 2f, size.height / 2f)
                 val baseRadius = size.minDimension * 0.28f
-                val activeBoost = if (isSessionActive) animatedLevel * 28f + idlePulse * 6f else idlePulse * 4f
+                val activeBoost = if (isSessionActive) animatedLevel * 26f + idlePulse * 5f else idlePulse * 4f
                 val ringColor = when (status) {
                     LiveConnectionStatus.TEACHER_SPEAKING -> primaryColor
                     LiveConnectionStatus.LISTENING -> secondaryColor
@@ -1030,12 +1045,12 @@ private fun LiveAcousticOrbStage(
 
                 drawCircle(
                     color = ringColor.copy(alpha = 0.14f + animatedLevel * 0.18f),
-                    radius = baseRadius + 30f + activeBoost * 1.4f,
+                    radius = baseRadius + 26f + activeBoost * 1.4f,
                     center = center
                 )
                 drawCircle(
                     color = ringColor.copy(alpha = 0.24f + animatedLevel * 0.22f),
-                    radius = baseRadius + 14f + activeBoost,
+                    radius = baseRadius + 12f + activeBoost,
                     center = center
                 )
                 drawCircle(
@@ -1050,7 +1065,7 @@ private fun LiveAcousticOrbStage(
                 painter = painterResource(id = R.drawable.img_teacher_avatar),
                 contentDescription = "MrStudy Canlı Öğretmen",
                 modifier = Modifier
-                    .size(84.dp)
+                    .size(76.dp)
                     .clip(CircleShape),
                 contentScale = ContentScale.Crop
             )
@@ -1065,68 +1080,53 @@ private fun LiveAcousticOrbStage(
             )
         }
 
-        if (!activePdfTitle.isNullOrBlank()) {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Text(
-                        text = "Bağlı Kaynak: $activePdfTitle (s.$activePdfPage)",
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-
         // Voice selector + Echo Guard toggle (before call starts)
         if (!isSessionActive) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                LiveLessonUiState.voiceOptions.forEach { voice ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+                ) {
+                    LiveLessonUiState.voiceOptions.forEach { voice ->
+                        FilterChip(
+                            selected = selectedVoice == voice.id,
+                            onClick = { onSelectVoice(voice.id) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.RecordVoiceOver,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            },
+                            label = { Text(voice.label, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+                ) {
                     FilterChip(
-                        selected = selectedVoice == voice.id,
-                        onClick = { onSelectVoice(voice.id) },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.RecordVoiceOver,
-                                contentDescription = null,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        },
-                        label = { Text(voice.label, style = MaterialTheme.typography.labelSmall) }
+                        selected = echoGuardEnabled,
+                        onClick = { onToggleEchoGuard(true) },
+                        label = { Text("Akıcı Anlatım (Hoparlör)", style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier.testTag("live_echo_guard_chip")
+                    )
+                    FilterChip(
+                        selected = !echoGuardEnabled,
+                        onClick = { onToggleEchoGuard(false) },
+                        label = { Text("Serbest Diyalog (Kulaklık)", style = MaterialTheme.typography.labelSmall) }
                     )
                 }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
-            ) {
-                FilterChip(
-                    selected = echoGuardEnabled,
-                    onClick = { onToggleEchoGuard(true) },
-                    label = { Text("Akıcı Anlatım (Hoparlör)", style = MaterialTheme.typography.labelSmall) },
-                    modifier = Modifier.testTag("live_echo_guard_chip")
-                )
-                FilterChip(
-                    selected = !echoGuardEnabled,
-                    onClick = { onToggleEchoGuard(false) },
-                    label = { Text("Serbest Diyalog (Kulaklık)", style = MaterialTheme.typography.labelSmall) }
-                )
             }
         }
     }
