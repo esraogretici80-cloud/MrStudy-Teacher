@@ -19,6 +19,8 @@ private const val TAG = "AppCheckInit"
 private const val DEBUG_TOKEN_EXTRA = "FIREBASE_APPCHECK_DEBUG_TOKEN"
 private const val DEBUG_STORE_PREFIX = "com.google.firebase.appcheck.debug.store."
 private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_SECRET"
+private const val LAST_BUILD_TOKEN_KEY = "com.example.mrstudy.LAST_BUILD_APPCHECK_TOKEN"
+private const val PLACEHOLDER_DEBUG_TOKEN = "YOUR_FIREBASE_APPCHECK_DEBUG_TOKEN"
 private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
 
 fun configureAppCheck(context: Context, intent: Intent?) {
@@ -33,20 +35,34 @@ fun configureAppCheck(context: Context, intent: Intent?) {
                 "$DEBUG_STORE_PREFIX$persistenceKey",
                 Context.MODE_PRIVATE
             )
-            val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
-            if (!debugToken.isNullOrEmpty()) {
+            val intentToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)?.trim()
+            val buildToken = BuildConfig.FIREBASE_APPCHECK_DEBUG_TOKEN
+                .trim()
+                .takeIf { it.isNotBlank() && it != PLACEHOLDER_DEBUG_TOKEN }
+
+            if (!intentToken.isNullOrEmpty()) {
                 // Synchronous commit() is required before installing DebugAppCheckProviderFactory
                 prefs.edit()
-                    .putString(DEBUG_SECRET_KEY, debugToken)
+                    .putString(DEBUG_SECRET_KEY, intentToken)
                     .commit()
                 Log.d(TAG, "App Check debug secret configured from launch Intent.")
+            } else if (!buildToken.isNullOrEmpty() &&
+                (prefs.getString(LAST_BUILD_TOKEN_KEY, null) != buildToken ||
+                    prefs.getString(DEBUG_SECRET_KEY, null).isNullOrBlank())
+            ) {
+                // Sync updated debug token from AI Studio Secrets / BuildConfig on install/update
+                prefs.edit()
+                    .putString(DEBUG_SECRET_KEY, buildToken)
+                    .putString(LAST_BUILD_TOKEN_KEY, buildToken)
+                    .commit()
+                Log.d(TAG, "App Check debug secret configured from BuildConfig Secrets.")
             } else if (prefs.getString(DEBUG_SECRET_KEY, null).isNullOrBlank()) {
                 // Pre-generate and synchronously persist a stable UUID for sideloaded debug installs
                 val generated = UUID.randomUUID().toString()
                 prefs.edit()
                     .putString(DEBUG_SECRET_KEY, generated)
                     .commit()
-                Log.w(TAG, "No debug token in Intent extra; generated persistent local debug secret.")
+                Log.w(TAG, "No debug token in Intent/Secrets; generated persistent local debug secret.")
             }
 
             FirebaseAppCheck.getInstance().installAppCheckProviderFactory(

@@ -118,6 +118,8 @@ fun LiveLessonScreen(
     onBack: () -> Unit,
     onSelectSubject: (String) -> Unit,
     onSelectVoice: (String) -> Unit,
+    onToggleEchoGuard: (Boolean) -> Unit = {},
+    onInterruptTeacher: () -> Unit = {},
     onStartLiveSession: () -> Unit,
     onStopLiveSession: () -> Unit,
     onToggleMute: () -> Unit,
@@ -370,10 +372,12 @@ fun LiveLessonScreen(
             teacherLevel = liveState.teacherAudioLevel,
             statusNotice = liveState.statusNotice,
             selectedVoice = liveState.selectedVoice,
+            echoGuardEnabled = liveState.echoGuardEnabled,
             isSessionActive = liveState.isSessionActive,
             activePdfTitle = appState.activePdf?.title,
             activePdfPage = appState.activePdfPage,
-            onSelectVoice = onSelectVoice
+            onSelectVoice = onSelectVoice,
+            onToggleEchoGuard = onToggleEchoGuard
         )
 
         // Live Scrolling Transcripts
@@ -565,21 +569,38 @@ fun LiveLessonScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Mute / Unmute
-                FilledTonalButton(
-                    onClick = onToggleMute,
-                    enabled = liveState.isSessionActive && liveState.status != LiveConnectionStatus.CONNECTING,
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .height(54.dp)
-                        .testTag("live_mute_button")
-                ) {
-                    Icon(
-                        imageVector = if (liveState.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                        contentDescription = if (liveState.isMuted) "Mikrofonu Aç" else "Mikrofonu Kapat"
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (liveState.isMuted) "Sessizde" else "Mikrofon")
+                // Mute / Unmute OR Instant Barge-in ("Sözü Al") while teacher speaks
+                if (liveState.status == LiveConnectionStatus.TEACHER_SPEAKING && liveState.echoGuardEnabled) {
+                    FilledTonalButton(
+                        onClick = onInterruptTeacher,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .height(54.dp)
+                            .testTag("live_interrupt_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Sözü Al ve Soru Sor"
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Sözü Al")
+                    }
+                } else {
+                    FilledTonalButton(
+                        onClick = onToggleMute,
+                        enabled = liveState.isSessionActive && liveState.status != LiveConnectionStatus.CONNECTING,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .height(54.dp)
+                            .testTag("live_mute_button")
+                    ) {
+                        Icon(
+                            imageVector = if (liveState.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = if (liveState.isMuted) "Mikrofonu Aç" else "Mikrofonu Kapat"
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (liveState.isMuted) "Sessizde" else "Mikrofon")
+                    }
                 }
 
                 // Start or End Live Lesson Call
@@ -668,10 +689,12 @@ private fun LiveAcousticOrbStage(
     teacherLevel: Float,
     statusNotice: String?,
     selectedVoice: String,
+    echoGuardEnabled: Boolean,
     isSessionActive: Boolean,
     activePdfTitle: String?,
     activePdfPage: Int,
-    onSelectVoice: (String) -> Unit
+    onSelectVoice: (String) -> Unit,
+    onToggleEchoGuard: (Boolean) -> Unit
 ) {
     val targetLevel = maxOf(userLevel, teacherLevel)
     val animatedLevel by animateFloatAsState(
@@ -773,7 +796,7 @@ private fun LiveAcousticOrbStage(
             }
         }
 
-        // Voice selector (interactive before call starts)
+        // Voice selector + Echo Guard toggle (before call starts)
         if (!isSessionActive) {
             Row(
                 modifier = Modifier
@@ -795,6 +818,25 @@ private fun LiveAcousticOrbStage(
                         label = { Text(voice.label, style = MaterialTheme.typography.labelSmall) }
                     )
                 }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+            ) {
+                FilterChip(
+                    selected = echoGuardEnabled,
+                    onClick = { onToggleEchoGuard(true) },
+                    label = { Text("Akıcı Anlatım (Hoparlör)", style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.testTag("live_echo_guard_chip")
+                )
+                FilterChip(
+                    selected = !echoGuardEnabled,
+                    onClick = { onToggleEchoGuard(false) },
+                    label = { Text("Serbest Diyalog (Kulaklık)", style = MaterialTheme.typography.labelSmall) }
+                )
             }
         }
     }

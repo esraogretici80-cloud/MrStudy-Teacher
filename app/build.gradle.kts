@@ -46,11 +46,31 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      buildConfigField("String", "FIREBASE_APPCHECK_DEBUG_TOKEN", "\"\"")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
+      val dotenvFile = rootProject.file(".env")
+      val dotenvValue = if (dotenvFile.exists()) {
+        dotenvFile.readLines()
+          .map { it.trim() }
+          .firstOrNull { !it.startsWith("#") && it.startsWith("FIREBASE_APPCHECK_DEBUG_TOKEN=") }
+          ?.substringAfter("=")
+          ?.trim()
+          ?.trim('"')
+          .orEmpty()
+      } else {
+        ""
+      }
+      val resolvedDebugToken = dotenvValue.ifBlank {
+        System.getenv("FIREBASE_APPCHECK_DEBUG_TOKEN").orEmpty().trim()
+      }
+      val safeDebugToken = resolvedDebugToken
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+      buildConfigField("String", "FIREBASE_APPCHECK_DEBUG_TOKEN", "\"$safeDebugToken\"")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")

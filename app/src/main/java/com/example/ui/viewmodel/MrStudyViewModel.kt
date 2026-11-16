@@ -1211,6 +1211,14 @@ class MrStudyViewModel(
         liveManager.selectVoice(voiceId)
     }
 
+    fun setLiveEchoGuardEnabled(enabled: Boolean) {
+        liveManager.setEchoGuardEnabled(enabled)
+    }
+
+    fun interruptLiveTeacher() {
+        liveManager.interruptAndSpeakNow()
+    }
+
     fun dismissLiveError() {
         liveManager.clearError()
     }

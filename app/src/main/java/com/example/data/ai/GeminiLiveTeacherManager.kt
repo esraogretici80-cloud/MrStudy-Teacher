@@ -4,12 +4,18 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
+import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import com.example.core.getLocalAppCheckDebugToken
 import com.example.core.isAppCheckErrorMessage
@@ -17,6 +23,7 @@ import com.example.data.model.StudentProfile
 import com.example.data.model.TeachingMode
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.ActivityDetectionConfig
 import com.google.firebase.ai.type.AudioTranscriptionConfig
 import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.InlineData
@@ -26,13 +33,16 @@ import com.google.firebase.ai.type.LiveServerGoAway
 import com.google.firebase.ai.type.LiveSession
 import com.google.firebase.ai.type.LiveSessionResumptionUpdate
 import com.google.firebase.ai.type.PublicPreviewAPI
+import com.google.firebase.ai.type.RealtimeInputConfig
 import com.google.firebase.ai.type.ResponseModality
 import com.google.firebase.ai.type.SessionResumptionConfig
 import com.google.firebase.ai.type.SpeechConfig
 import com.google.firebase.ai.type.TextPart
 import com.google.firebase.ai.type.Voice
+import com.google.firebase.ai.type.activityDetectionConfig
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.liveGenerationConfig
+import com.google.firebase.ai.type.realtimeInputConfig
 import com.google.firebase.appcheck.FirebaseAppCheck
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +63,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
 enum class LiveConnectionStatus(val label: String) {
@@ -80,6 +92,7 @@ data class LiveVoiceOption(
 data class LiveLessonUiState(
     val status: LiveConnectionStatus = LiveConnectionStatus.IDLE,
     val isMuted: Boolean = false,
+    val echoGuardEnabled: Boolean = true,
     val userAudioLevel: Float = 0f,
     val teacherAudioLevel: Float = 0f,
     val liveUserTranscript: String = "",
@@ -124,13 +137,38 @@ class GeminiLiveTeacherManager {
     private var audioTrack: AudioTrack? = null
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
+    private var automaticGainControl: AutomaticGainControl? = null
     private var playbackChannel: Channel<ByteArray>? = null
     private var resumptionHandle: String? = null
     private var turnCounter = 0
 
+    // Audio routing & focus management
+    private var audioManager: AudioManager? = null
+    private var previousAudioMode: Int = AudioManager.MODE_NORMAL
+    private var previousSpeakerphoneOn: Boolean = false
+    private var audioFocusRequest: AudioFocusRequest? = null
+
+    // Echo & turn-state coordination
+    private val isReceivingTeacherAudio = AtomicBoolean(false)
+    private val playbackDrainDeadlineMs = AtomicLong(0L)
+    private val forceBargeInWindowUntilMs = AtomicLong(0L)
+
     fun selectVoice(voiceId: String) {
         if (!_state.value.isSessionActive) {
             _state.update { it.copy(selectedVoice = voiceId) }
+        }
+    }
+
+    fun setEchoGuardEnabled(enabled: Boolean) {
+        _state.update {
+            it.copy(
+                echoGuardEnabled = enabled,
+                statusNotice = if (enabled) {
+                    "Akıcı Anlatım (Yankı Koruması) açık: Öğretmen konuşurken hoparlör sesi sözünü kesmez."
+                } else {
+                    "Serbest Diyalog açık (Kulaklık önerilir): İstediğin an konuşarak sözünü kesebilirsin."
+                }
+            )
         }
     }
 
@@ -151,13 +189,41 @@ class GeminiLiveTeacherManager {
             val nextStatus = when {
                 !state.isSessionActive -> state.status
                 nextMuted -> LiveConnectionStatus.MUTED
-                state.teacherAudioLevel > 0.03f -> LiveConnectionStatus.TEACHER_SPEAKING
+                isTeacherSpeakingNow() -> LiveConnectionStatus.TEACHER_SPEAKING
                 else -> LiveConnectionStatus.LISTENING
             }
             state.copy(
                 isMuted = nextMuted,
                 userAudioLevel = if (nextMuted) 0f else state.userAudioLevel,
                 status = nextStatus
+            )
+        }
+    }
+
+    fun interruptAndSpeakNow() {
+        if (!_state.value.isSessionActive) return
+        val queue = playbackChannel
+        if (queue != null) {
+            drainChannel(queue)
+        }
+        runCatching {
+            audioTrack?.let { track ->
+                track.pause()
+                track.flush()
+                track.play()
+            }
+        }
+        isReceivingTeacherAudio.set(false)
+        playbackDrainDeadlineMs.set(0L)
+        // Open microphone immediately for the next 8 seconds even if server finishes a trailing packet
+        forceBargeInWindowUntilMs.set(SystemClock.elapsedRealtime() + 8_000L)
+        _state.update {
+            it.copy(
+                isMuted = false,
+                teacherAudioLevel = 0f,
+                liveTeacherTranscript = "",
+                status = LiveConnectionStatus.LISTENING,
+                statusNotice = "Söz sende! Sorunu doğrudan söyleyebilirsin."
             )
         }
     }
@@ -205,12 +271,16 @@ class GeminiLiveTeacherManager {
                 )
 
                 val selectedVoice = _state.value.selectedVoice
+                val echoGuard = _state.value.echoGuardEnabled
                 val (session, usedModel) = connectWithFallback(
                     voiceName = selectedVoice,
+                    echoGuardEnabled = echoGuard,
                     systemInstruction = systemInstructionContent,
                     resumeHandle = null
                 )
                 liveSession = session
+
+                configureCommunicationAudioRouting(appContext)
 
                 _state.update {
                     it.copy(
@@ -242,12 +312,16 @@ class GeminiLiveTeacherManager {
                     } else ""
                     session.send(
                         "Merhaba hocam! Canlı ders anlatımına başlayalım. Konu: $subject.$pdfHint " +
-                            "Kısaca merhaba de ve bugün ne çalışmak istediğimi sor."
+                            "Kısaca sıcak bir merhaba de ve bugün hangi konuyu veya soruyu çalışmak istediğimi sor."
                     )
                 }
 
                 val playbackJob = launch(Dispatchers.IO) {
                     runPlaybackLoop(queue, track)
+                }
+
+                val statusSyncJob = launch(Dispatchers.IO) {
+                    runSpeakingStatusMonitorLoop()
                 }
 
                 val micJob = launch(Dispatchers.IO) {
@@ -258,10 +332,10 @@ class GeminiLiveTeacherManager {
                     runReceiveLoop(session, queue, track)
                 }
 
-                // Wait for receive/mic loops; any fatal error propagates
                 receiveJob.join()
                 micJob.cancel()
                 playbackJob.cancel()
+                statusSyncJob.cancel()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -331,6 +405,10 @@ class GeminiLiveTeacherManager {
         sessionScopeJob?.cancel()
         sessionScopeJob = null
 
+        isReceivingTeacherAudio.set(false)
+        playbackDrainDeadlineMs.set(0L)
+        forceBargeInWindowUntilMs.set(0L)
+
         val sessionToClose = liveSession
         liveSession = null
         if (sessionToClose != null) {
@@ -372,6 +450,7 @@ class GeminiLiveTeacherManager {
 
     private suspend fun connectWithFallback(
         voiceName: String,
+        echoGuardEnabled: Boolean,
         systemInstruction: com.google.firebase.ai.type.Content,
         resumeHandle: String?
     ): Pair<LiveSession, String> {
@@ -380,6 +459,19 @@ class GeminiLiveTeacherManager {
             speechConfig = SpeechConfig(voice = Voice(voiceName))
             inputAudioTranscription = AudioTranscriptionConfig()
             outputAudioTranscription = AudioTranscriptionConfig()
+            realtimeInputConfig = realtimeInputConfig {
+                automaticActivityDetection = activityDetectionConfig {
+                    startSensitivity = ActivityDetectionConfig.Sensitivity.LOW
+                    endSensitivity = ActivityDetectionConfig.Sensitivity.LOW
+                    prefixPaddingMs = 180
+                    silenceDurationMs = 900
+                }
+                activityHandling = if (echoGuardEnabled) {
+                    RealtimeInputConfig.ActivityHandling.NO_INTERRUPT
+                } else {
+                    RealtimeInputConfig.ActivityHandling.INTERRUPT
+                }
+            }
         }
 
         val resumption = if (resumeHandle != null) {
@@ -409,7 +501,8 @@ class GeminiLiveTeacherManager {
                 msg.contains("not found", ignoreCase = true) ||
                     msg.contains("unsupported", ignoreCase = true) ||
                     msg.contains("model", ignoreCase = true) ||
-                    msg.contains("404", ignoreCase = true)
+                    msg.contains("404", ignoreCase = true) ||
+                    msg.contains("invalid", ignoreCase = true)
                 )
             if (!shouldFallback) throw primaryErr
 
@@ -432,6 +525,91 @@ class GeminiLiveTeacherManager {
             while (isActive) {
                 delay(1000L)
                 _state.update { it.copy(elapsedSeconds = it.elapsedSeconds + 1) }
+            }
+        }
+    }
+
+    private fun configureCommunicationAudioRouting(context: Context) {
+        runCatching {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            audioManager = am
+            previousAudioMode = am.mode
+            @Suppress("DEPRECATION")
+            previousSpeakerphoneOn = am.isSpeakerphoneOn
+
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(attrs)
+                    .setAcceptsDelayedFocusGain(false)
+                    .setOnAudioFocusChangeListener { }
+                    .build()
+                audioFocusRequest = req
+                am.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_VOICE_CALL,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+                )
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val devices = am.availableCommunicationDevices
+                val hasExternalDevice = devices.any {
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                }
+                if (!hasExternalDevice) {
+                    val speaker = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    if (speaker != null) {
+                        am.setCommunicationDevice(speaker)
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                if (!am.isWiredHeadsetOn && !am.isBluetoothScoOn && !am.isBluetoothA2dpOn) {
+                    am.isSpeakerphoneOn = true
+                }
+            }
+        }.onFailure { err ->
+            Log.w(TAG, "AudioManager communication routing setup failed", err)
+        }
+    }
+
+    private fun isTeacherSpeakingNow(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now < forceBargeInWindowUntilMs.get()) return false
+        return isReceivingTeacherAudio.get() || now < playbackDrainDeadlineMs.get()
+    }
+
+    private suspend fun runSpeakingStatusMonitorLoop() {
+        while (true) {
+            delay(120L)
+            val current = _state.value
+            if (!current.isSessionActive || current.status == LiveConnectionStatus.CONNECTING) continue
+            val speaking = isTeacherSpeakingNow()
+            val desiredStatus = when {
+                current.isMuted -> LiveConnectionStatus.MUTED
+                speaking -> LiveConnectionStatus.TEACHER_SPEAKING
+                else -> LiveConnectionStatus.LISTENING
+            }
+            if (current.status != desiredStatus || (!speaking && current.teacherAudioLevel > 0f)) {
+                _state.update {
+                    it.copy(
+                        status = desiredStatus,
+                        teacherAudioLevel = if (speaking) it.teacherAudioLevel else 0f
+                    )
+                }
             }
         }
     }
@@ -478,26 +656,83 @@ class GeminiLiveTeacherManager {
                 noiseSuppressor = NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true }
             }
         }
+        if (AutomaticGainControl.isAvailable()) {
+            runCatching {
+                automaticGainControl = AutomaticGainControl.create(record.audioSessionId)?.apply { enabled = true }
+            }
+        }
 
         record.startRecording()
-        val chunk = ByteArray(3200) // ~100ms @ 16kHz 16-bit mono
+        val chunk = ByteArray(3200) // 100ms @ 16kHz 16-bit mono
+        val preRollQueue = ArrayDeque<ByteArray>(3)
+        var lastSpeechDetectedMs = 0L
+        var lastUiMeterUpdateMs = 0L
+
         try {
             while (isActive && _state.value.isSessionActive) {
                 val read = record.read(chunk, 0, chunk.size)
-                if (read > 0) {
-                    if (_state.value.isMuted) {
+                if (read <= 0) continue
+
+                val stateSnapshot = _state.value
+                val now = SystemClock.elapsedRealtime()
+
+                if (stateSnapshot.isMuted) {
+                    preRollQueue.clear()
+                    if (stateSnapshot.userAudioLevel != 0f) {
                         _state.update { it.copy(userAudioLevel = 0f) }
-                        continue
                     }
-                    val level = computePcm16Rms(chunk, read)
-                    _state.update { it.copy(userAudioLevel = level) }
-                    val payload = chunk.copyOf(read)
+                    continue
+                }
+
+                // Echo Guard: while the teacher's voice is coming out of speaker (+ tail),
+                // pause mic streaming so speaker output does NOT cause 2-word self-interruptions or phantom words.
+                val teacherTalking = isTeacherSpeakingNow()
+                if (stateSnapshot.echoGuardEnabled && teacherTalking) {
+                    preRollQueue.clear()
+                    if (stateSnapshot.userAudioLevel != 0f) {
+                        _state.update { it.copy(userAudioLevel = 0f) }
+                    }
+                    continue
+                }
+
+                val payload = chunk.copyOf(read)
+                val level = computePcm16Rms(payload, read)
+
+                // Adaptive noise gate + pre-roll so ambient static does NOT hallucinate phantom transcripts
+                val speechThreshold = if (teacherTalking) BARGE_IN_SPEECH_RMS else NOISE_GATE_SPEECH_RMS
+                if (level >= speechThreshold) {
+                    lastSpeechDetectedMs = now
+                }
+                val isGateOpen = (now - lastSpeechDetectedMs) <= SPEECH_HANGOVER_MS
+
+                if (now - lastUiMeterUpdateMs >= 90L) {
+                    lastUiMeterUpdateMs = now
+                    val visibleLevel = if (isGateOpen) level else (level * 0.25f)
+                    _state.update { it.copy(userAudioLevel = visibleLevel) }
+                }
+
+                if (isGateOpen) {
+                    // Flush ~200ms pre-roll first so opening syllables aren't clipped
+                    while (preRollQueue.isNotEmpty()) {
+                        val pre = preRollQueue.removeFirst()
+                        runCatching {
+                            session.sendAudioRealtime(InlineData(pre, "audio/pcm"))
+                        }.onFailure { err ->
+                            if (err is CancellationException) throw err
+                            Log.w(TAG, "sendAudioRealtime pre-roll error", err)
+                        }
+                    }
                     runCatching {
-                        session.sendAudioRealtime(InlineData(payload, "audio/pcm;rate=$INPUT_SAMPLE_RATE"))
+                        session.sendAudioRealtime(InlineData(payload, "audio/pcm"))
                     }.onFailure { err ->
                         if (err is CancellationException) throw err
                         Log.w(TAG, "sendAudioRealtime error", err)
                     }
+                } else {
+                    if (preRollQueue.size >= 2) {
+                        preRollQueue.removeFirst()
+                    }
+                    preRollQueue.addLast(payload)
                 }
             }
         } finally {
@@ -512,10 +747,13 @@ class GeminiLiveTeacherManager {
             AudioFormat.ENCODING_PCM_16BIT
         ).coerceAtLeast(4800)
 
+        // ~500ms jitter-resistant playback buffer at 24kHz 16-bit mono (48,000 B/s)
+        val smoothBufferSize = maxOf(minBuf * 4, 24_000)
+
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -526,7 +764,7 @@ class GeminiLiveTeacherManager {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build()
             )
-            .setBufferSizeInBytes(minBuf * 2)
+            .setBufferSizeInBytes(smoothBufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track.play()
@@ -534,19 +772,44 @@ class GeminiLiveTeacherManager {
     }
 
     private suspend fun runPlaybackLoop(queue: Channel<ByteArray>, track: AudioTrack) = withContext(Dispatchers.IO) {
-        for (pcm in queue) {
+        var lastMeterUpdateMs = 0L
+        for (firstChunk in queue) {
             if (!isActive) break
-            val level = computePcm16Rms(pcm, pcm.size)
-            _state.update { state ->
-                state.copy(
-                    teacherAudioLevel = level,
-                    status = if (state.isSessionActive && !state.isMuted) {
-                        LiveConnectionStatus.TEACHER_SPEAKING
-                    } else {
-                        state.status
-                    }
-                )
+
+            // Coalesce burst of immediately-ready PCM chunks on a fresh turn for stutter-free playback
+            val batch = ByteArrayOutputStream(firstChunk.size * 2)
+            batch.write(firstChunk)
+            if (playbackDrainDeadlineMs.get() < SystemClock.elapsedRealtime()) {
+                delay(45L) // Small jitter pre-buffer only at start of utterance
             }
+            while (batch.size() < 9_600) {
+                val next = queue.tryReceive().getOrNull() ?: break
+                batch.write(next)
+            }
+
+            val pcm = batch.toByteArray()
+            val now = SystemClock.elapsedRealtime()
+            val durationMs = (pcm.size.toLong() * 1000L) / (OUTPUT_SAMPLE_RATE * 2L)
+            playbackDrainDeadlineMs.updateAndGet { current ->
+                (maxOf(current, now) + durationMs + SPEAKER_TAIL_HOLD_MS)
+                    .coerceAtMost(now + 20_000L)
+            }
+
+            if (now - lastMeterUpdateMs >= 80L) {
+                lastMeterUpdateMs = now
+                val level = computePcm16Rms(pcm, pcm.size)
+                _state.update { state ->
+                    state.copy(
+                        teacherAudioLevel = level,
+                        status = if (state.isSessionActive && !state.isMuted) {
+                            LiveConnectionStatus.TEACHER_SPEAKING
+                        } else {
+                            state.status
+                        }
+                    )
+                }
+            }
+
             var offset = 0
             while (offset < pcm.size && isActive) {
                 val written = track.write(pcm, offset, pcm.size - offset)
@@ -574,6 +837,8 @@ class GeminiLiveTeacherManager {
                             track.flush()
                             track.play()
                         }
+                        isReceivingTeacherAudio.set(false)
+                        playbackDrainDeadlineMs.set(0L)
                         if (teacherTurnBuffer.isNotBlank()) {
                             appendTranscriptEntry(
                                 isStudent = false,
@@ -607,7 +872,11 @@ class GeminiLiveTeacherManager {
                     for (part in parts) {
                         when (part) {
                             is InlineDataPart -> {
-                                if (part.mimeType.startsWith("audio/pcm", ignoreCase = true)) {
+                                if (part.mimeType.startsWith("audio/pcm", ignoreCase = true) &&
+                                    part.inlineData.isNotEmpty()
+                                ) {
+                                    forceBargeInWindowUntilMs.set(0L)
+                                    isReceivingTeacherAudio.set(true)
                                     queue.trySend(part.inlineData)
                                 }
                             }
@@ -622,6 +891,7 @@ class GeminiLiveTeacherManager {
                     }
 
                     if (message.turnComplete) {
+                        isReceivingTeacherAudio.set(false)
                         val uText = userTurnBuffer.toString().trim()
                         val tText = teacherTurnBuffer.toString().trim()
                         if (uText.isNotBlank()) {
@@ -632,12 +902,17 @@ class GeminiLiveTeacherManager {
                         }
                         userTurnBuffer.clear()
                         teacherTurnBuffer.clear()
+                        val stillPlaying = isTeacherSpeakingNow()
                         _state.update {
                             it.copy(
                                 liveUserTranscript = "",
                                 liveTeacherTranscript = "",
-                                teacherAudioLevel = 0f,
-                                status = if (it.isMuted) LiveConnectionStatus.MUTED else LiveConnectionStatus.LISTENING
+                                teacherAudioLevel = if (stillPlaying) it.teacherAudioLevel else 0f,
+                                status = when {
+                                    it.isMuted -> LiveConnectionStatus.MUTED
+                                    stillPlaying -> LiveConnectionStatus.TEACHER_SPEAKING
+                                    else -> LiveConnectionStatus.LISTENING
+                                }
                             )
                         }
                     }
@@ -699,6 +974,8 @@ class GeminiLiveTeacherManager {
         echoCanceler = null
         runCatching { noiseSuppressor?.release() }
         noiseSuppressor = null
+        runCatching { automaticGainControl?.release() }
+        automaticGainControl = null
 
         runCatching {
             audioRecord?.stop()
@@ -712,6 +989,26 @@ class GeminiLiveTeacherManager {
             audioTrack?.release()
         }
         audioTrack = null
+
+        audioManager?.let { am ->
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    audioFocusRequest?.let { req -> am.abandonAudioFocusRequest(req) }
+                } else {
+                    @Suppress("DEPRECATION")
+                    am.abandonAudioFocus(null)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    am.clearCommunicationDevice()
+                } else {
+                    @Suppress("DEPRECATION")
+                    am.isSpeakerphoneOn = previousSpeakerphoneOn
+                }
+                am.mode = previousAudioMode
+            }
+        }
+        audioFocusRequest = null
+        audioManager = null
     }
 
     private fun buildLiveSystemInstruction(
@@ -738,10 +1035,10 @@ class GeminiLiveTeacherManager {
                 $pdfLine
 
                 CANLI DERS KURALLARI:
-                1. Her zaman akıcı, sıcak, motive edici ve anlaşılır TÜRKÇE konuş.
-                2. Sesli diyalogda uzun monologlar kurma; 2-4 cümlede bir kısa durakla ve öğrenciye "Buraya kadar net mi?", "Bir örnekle deneyelim mi?" gibi etkileşimli sorular sor.
-                3. Matematik ifadelerini ve sembolleri kulakla anlaşılacak şekilde tane tane oku (örn. 'x kare artı iki x').
-                4. Öğrenci sözünü keserse hemen dinlemeye geç ve yeni sorusuna odaklan.
+                1. Her zaman son derece akıcı, doğal vurgulu, sıcak, motive edici ve anlaşılır TÜRKÇE konuş.
+                2. Cümleleri yarıda kesme; konuyu mantıklı bir akışla, 3-5 akıcı cümlelik anlamlı bir anlatım bloğu halinde tamamla, sonunda öğrenciye "Buraya kadar anlaşıldı mı?" veya "Bir örnekle pekiştirelim mi?" diye sor.
+                3. Matematik ifadelerini ve sembolleri kulakla rahat anlaşılacak şekilde tane tane oku (örn. 'x kare artı iki x eşittir beş').
+                4. Yabancı sesler veya anlamsız arka plan gürültüsü duyarsan uydurma yanıt verme, sadece öğrencinin net Türkçe sorusuna odaklan.
                 5. Emin olmadığın bilgiyi asla uydurma.
                 """.trimIndent()
             )
@@ -777,7 +1074,9 @@ class GeminiLiveTeacherManager {
         var count = 0
         var i = 0
         while (i + 1 < length) {
-            val sample = (bytes[i].toInt() and 0xFF) or (bytes[i + 1].toInt() shl 8)
+            val low = bytes[i].toInt() and 0xFF
+            val high = bytes[i + 1].toInt()
+            val sample = ((high shl 8) or low).toShort().toInt()
             val norm = sample / 32768.0
             sumSq += norm * norm
             count++
@@ -820,5 +1119,9 @@ class GeminiLiveTeacherManager {
         const val OUTPUT_SAMPLE_RATE = 24_000
         const val APP_CHECK_TIMEOUT_MS = 10_000L
         const val CONNECT_TIMEOUT_MS = 15_000L
+        const val SPEAKER_TAIL_HOLD_MS = 450L
+        const val NOISE_GATE_SPEECH_RMS = 0.018f
+        const val BARGE_IN_SPEECH_RMS = 0.065f
+        const val SPEECH_HANGOVER_MS = 750L
     }
 }

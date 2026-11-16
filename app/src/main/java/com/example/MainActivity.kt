@@ -297,6 +297,8 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onBack = { navController.popBackStack() },
                                     onSelectSubject = viewModel::selectSubject,
                                     onSelectVoice = viewModel::selectLiveVoice,
+                                    onToggleEchoGuard = viewModel::setLiveEchoGuardEnabled,
+                                    onInterruptTeacher = viewModel::interruptLiveTeacher,
                                     onStartLiveSession = { viewModel.startLiveLesson(context) },
                                     onStopLiveSession = viewModel::stopLiveLesson,
                                     onToggleMute = viewModel::toggleLiveMute,
