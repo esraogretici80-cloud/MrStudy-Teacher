@@ -1305,6 +1305,62 @@ class MrStudyViewModel(
         }
     }
 
+    fun changeLivePdfPage(delta: Int) {
+        val state = _uiState.value
+        val activePdf = state.activePdf ?: return
+        val maxPages = activePdf.pageCount.toInt().coerceAtLeast(1)
+        val currentPage = state.activePdfPage
+        val newPage = (currentPage + delta).coerceIn(1, maxPages)
+        if (newPage == currentPage) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPdfBusy = true) }
+            try {
+                val bitmap = PdfHelper.renderPdfPage(activePdf.localUriString, newPage - 1, maxWidthPx = 960)
+                _uiState.update {
+                    it.copy(
+                        activePdfPage = newPage,
+                        renderedPdfPage = bitmap,
+                        statusBanner = "${activePdf.title}: $newPage. sayfaya geçildi"
+                    )
+                }
+                repository.updatePdfSource(currentUserId, activePdf.copy(lastStudiedPage = newPage.toLong()))
+
+                if (liveManager.state.value.isSessionActive) {
+                    if (bitmap != null) {
+                        liveManager.sendVisualContextDuringLive(
+                            bitmap = bitmap,
+                            label = "${activePdf.title} s.$newPage",
+                            promptText = "Öğrenci PDF kaynağında $newPage. sayfaya geçti (önceki sayfa: $currentPage). Bu yeni sayfadaki konuyu/soruları kısaca inceleyip öğrenciye rehberlik et."
+                        )
+                    } else {
+                        liveManager.sendTextDuringLive("Öğrenci ${activePdf.title} dökümanında $newPage. sayfaya geçti.")
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(pdfError = "Sayfa değiştirilemedi: ${e.localizedMessage}") }
+            } finally {
+                _uiState.update { it.copy(isPdfBusy = false) }
+            }
+        }
+    }
+
+    fun selectPdfForLive(pdf: PdfResourceRecord) {
+        selectPdfAndLoadPage(pdf, pdf.lastStudiedPage.toInt().coerceAtLeast(1))
+        if (liveManager.state.value.isSessionActive) {
+            viewModelScope.launch {
+                delay(350L)
+                sendActivePdfPageToLive()
+            }
+        }
+    }
+
+    fun toggleBluetoothAudio() {
+        liveManager.toggleAudioOutput()
+    }
+
     fun saveLiveTranscriptAsNote() {
         val entries = liveManager.state.value.transcriptItems
         if (entries.isEmpty()) return

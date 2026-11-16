@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -43,8 +44,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.os.Build
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Call
@@ -52,11 +55,18 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.ui.graphics.asImageBitmap
+import com.example.data.model.PdfResourceRecord
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -123,6 +133,9 @@ fun LiveLessonScreen(
     onStartLiveSession: () -> Unit,
     onStopLiveSession: () -> Unit,
     onToggleMute: () -> Unit,
+    onToggleBluetoothAudio: () -> Unit = {},
+    onChangeLivePdfPage: (delta: Int) -> Unit = {},
+    onSelectPdfForLive: (PdfResourceRecord) -> Unit = {},
     onSendLiveText: (String) -> Unit,
     onSendLiveImageUri: (Uri) -> Unit,
     onSendActivePdfPage: () -> Unit,
@@ -138,11 +151,32 @@ fun LiveLessonScreen(
                 PackageManager.PERMISSION_GRANTED
         )
     }
+    var hasBluetoothPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
+                    PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+        )
+    }
     var showPermissionDeniedCard by remember { mutableStateOf(false) }
     var showSubjectMenu by remember { mutableStateOf(false) }
+    var showPdfMenu by remember { mutableStateOf(false) }
+    var isPdfPreviewExpanded by remember { mutableStateOf(false) }
     var quickInputText by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var copiedToken by remember(liveState.debugAppCheckToken) { mutableStateOf(false) }
+
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasBluetoothPermission = granted
+        if (granted) {
+            onToggleBluetoothAudio()
+        }
+    }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -262,7 +296,42 @@ fun LiveLessonScreen(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    AssistChip(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission) {
+                                bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                            } else {
+                                onToggleBluetoothAudio()
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (liveState.isBluetoothHeadsetConnected) Icons.Default.Headphones else Icons.Default.VolumeUp,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = if (liveState.isBluetoothHeadsetConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = if (liveState.isBluetoothHeadsetConnected) "BT Kulaklık" else "Hoparlör",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (liveState.isBluetoothHeadsetConnected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            }
+                        ),
+                        modifier = Modifier.testTag("live_audio_route_chip")
+                    )
+
                     Box {
                         AssistChip(
                             onClick = { if (!liveState.isSessionActive) showSubjectMenu = true },
@@ -379,6 +448,220 @@ fun LiveLessonScreen(
             onSelectVoice = onSelectVoice,
             onToggleEchoGuard = onToggleEchoGuard
         )
+
+        // Live PDF Pagination & Document Controller
+        val currentPdf = appState.activePdf
+        if (currentPdf != null) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                ),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("live_pdf_control_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                shape = CircleShape,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Description,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = currentPdf.title,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Canlı derse bağlı PDF kaynağı",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Box {
+                            TextButton(
+                                onClick = { showPdfMenu = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Değiştir", style = MaterialTheme.typography.labelSmall)
+                            }
+                            DropdownMenu(
+                                expanded = showPdfMenu,
+                                onDismissRequest = { showPdfMenu = false }
+                            ) {
+                                appState.pdfSources.forEach { pdf ->
+                                    DropdownMenuItem(
+                                        text = { Text(pdf.title) },
+                                        onClick = {
+                                            onSelectPdfForLive(pdf)
+                                            showPdfMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // < > Page Stepper Bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        IconButton(
+                            onClick = { onChangeLivePdfPage(-1) },
+                            enabled = appState.activePdfPage > 1 && !appState.isPdfBusy,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("live_pdf_prev_page")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Önceki Sayfa (<)",
+                                tint = if (appState.activePdfPage > 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Sayfa ${appState.activePdfPage} / ${currentPdf.pageCount}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (appState.isPdfBusy) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                }
+                            }
+                            Text(
+                                text = if (liveState.isSessionActive) "Öğretmen bu sayfayı görüyor" else "Ders başladığında gösterilir",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { onChangeLivePdfPage(1) },
+                            enabled = appState.activePdfPage < currentPdf.pageCount && !appState.isPdfBusy,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("live_pdf_next_page")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Sonraki Sayfa (>)",
+                                tint = if (appState.activePdfPage < currentPdf.pageCount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
+                        }
+                    }
+
+                    // Expandable Page Preview
+                    if (appState.renderedPdfPage != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isPdfPreviewExpanded = !isPdfPreviewExpanded }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = if (isPdfPreviewExpanded) "Sayfa önizlemesini gizle" else "Sayfa önizlemesini göster",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Icon(
+                                imageVector = if (isPdfPreviewExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        AnimatedVisibility(visible = isPdfPreviewExpanded) {
+                            Image(
+                                bitmap = appState.renderedPdfPage.asImageBitmap(),
+                                contentDescription = "PDF Sayfa Önizleme",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 180.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (appState.pdfSources.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Box {
+                    AssistChip(
+                        onClick = { showPdfMenu = true },
+                        leadingIcon = {
+                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = { Text("📄 Canlı Derse PDF Bağla (${appState.pdfSources.size} kaynak)") },
+                        modifier = Modifier.testTag("live_bind_pdf_chip")
+                    )
+                    DropdownMenu(
+                        expanded = showPdfMenu,
+                        onDismissRequest = { showPdfMenu = false }
+                    ) {
+                        appState.pdfSources.forEach { pdf ->
+                            DropdownMenuItem(
+                                text = { Text("${pdf.title} (${pdf.pageCount} sayfa)") },
+                                onClick = {
+                                    onSelectPdfForLive(pdf)
+                                    showPdfMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         // Live Scrolling Transcripts
         LazyColumn(

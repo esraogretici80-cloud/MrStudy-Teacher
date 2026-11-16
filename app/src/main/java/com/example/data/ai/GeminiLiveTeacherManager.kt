@@ -1,13 +1,18 @@
 package com.example.data.ai
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
+import androidx.annotation.RequiresApi
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
@@ -101,6 +106,9 @@ data class LiveLessonUiState(
     val elapsedSeconds: Int = 0,
     val selectedVoice: String = "AOEDE",
     val activeModelName: String = PRIMARY_LIVE_MODEL,
+    val isBluetoothHeadsetConnected: Boolean = false,
+    val activeAudioDeviceName: String = "Hoparlör",
+    val isSpeakerForced: Boolean = false,
     val errorMessage: String? = null,
     val debugAppCheckToken: String? = null,
     val statusNotice: String? = null
@@ -147,11 +155,15 @@ class GeminiLiveTeacherManager {
     private var previousAudioMode: Int = AudioManager.MODE_NORMAL
     private var previousSpeakerphoneOn: Boolean = false
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
+    private var scoReceiver: BroadcastReceiver? = null
+    private var appContext: Context? = null
 
     // Echo & turn-state coordination
     private val isReceivingTeacherAudio = AtomicBoolean(false)
     private val playbackDrainDeadlineMs = AtomicLong(0L)
     private val forceBargeInWindowUntilMs = AtomicLong(0L)
+    private val unmuteSpeechGraceUntilMs = AtomicLong(0L)
 
     fun selectVoice(voiceId: String) {
         if (!_state.value.isSessionActive) {
@@ -185,18 +197,104 @@ class GeminiLiveTeacherManager {
 
     fun toggleMute() {
         val nextMuted = !_state.value.isMuted
+        val now = SystemClock.elapsedRealtime()
+        if (!nextMuted) {
+            // Unmuting: user explicitly wants to speak!
+            // 1. Give an unconditional barge-in & mic transmission window (5 seconds)
+            forceBargeInWindowUntilMs.set(now + 5_000L)
+            unmuteSpeechGraceUntilMs.set(now + 4_000L)
+            playbackDrainDeadlineMs.set(0L)
+            isReceivingTeacherAudio.set(false)
+            // Drain trailing teacher audio from playback queue so student speaks into silence
+            playbackChannel?.let { drainChannel(it) }
+            runCatching {
+                audioTrack?.let { track ->
+                    track.pause()
+                    track.flush()
+                    track.play()
+                }
+            }
+        }
         _state.update { state ->
             val nextStatus = when {
                 !state.isSessionActive -> state.status
                 nextMuted -> LiveConnectionStatus.MUTED
-                isTeacherSpeakingNow() -> LiveConnectionStatus.TEACHER_SPEAKING
                 else -> LiveConnectionStatus.LISTENING
             }
             state.copy(
                 isMuted = nextMuted,
                 userAudioLevel = if (nextMuted) 0f else state.userAudioLevel,
-                status = nextStatus
+                status = nextStatus,
+                statusNotice = if (nextMuted) "Mikrofon kapatıldı (Sessiz mod)." else "Mikrofon açıldı, doğrudan konuşabilirsin!"
             )
+        }
+    }
+
+    fun toggleAudioOutput() {
+        val am = audioManager ?: return
+        val currentIsBt = _state.value.isBluetoothHeadsetConnected
+        val willForceSpeaker = !currentIsBt
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val devices = am.availableCommunicationDevices
+            if (willForceSpeaker) {
+                val speaker = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (speaker != null) am.setCommunicationDevice(speaker)
+                _state.update {
+                    it.copy(
+                        isBluetoothHeadsetConnected = false,
+                        isSpeakerForced = true,
+                        activeAudioDeviceName = "Hoparlör",
+                        statusNotice = "Hoparlör aktif edildi."
+                    )
+                }
+            } else {
+                val btDevice = devices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                }
+                if (btDevice != null) {
+                    am.setCommunicationDevice(btDevice)
+                    val name = btDevice.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Bluetooth Kulaklık"
+                    _state.update {
+                        it.copy(
+                            isBluetoothHeadsetConnected = true,
+                            isSpeakerForced = false,
+                            activeAudioDeviceName = name,
+                            statusNotice = "🎧 $name aktif edildi."
+                        )
+                    }
+                } else {
+                    _state.update { it.copy(statusNotice = "Bağlı Bluetooth kulaklık bulunamadı.") }
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            if (willForceSpeaker) {
+                runCatching { am.stopBluetoothSco() }
+                am.isBluetoothScoOn = false
+                am.isSpeakerphoneOn = true
+                _state.update {
+                    it.copy(
+                        isBluetoothHeadsetConnected = false,
+                        isSpeakerForced = true,
+                        activeAudioDeviceName = "Hoparlör",
+                        statusNotice = "Hoparlör aktif edildi."
+                    )
+                }
+            } else {
+                runCatching { am.startBluetoothSco() }
+                am.isBluetoothScoOn = true
+                _state.update {
+                    it.copy(
+                        isBluetoothHeadsetConnected = true,
+                        isSpeakerForced = false,
+                        activeAudioDeviceName = "Bluetooth Kulaklık",
+                        statusNotice = "🎧 Bluetooth kulaklığa geçildi."
+                    )
+                }
+            }
         }
     }
 
@@ -530,8 +628,10 @@ class GeminiLiveTeacherManager {
     }
 
     private fun configureCommunicationAudioRouting(context: Context) {
+        val appCtx = context.applicationContext
+        appContext = appCtx
         runCatching {
-            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            val am = appCtx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
             audioManager = am
             previousAudioMode = am.mode
             @Suppress("DEPRECATION")
@@ -562,27 +662,95 @@ class GeminiLiveTeacherManager {
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val devices = am.availableCommunicationDevices
-                val hasExternalDevice = devices.any {
-                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
-                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
-                }
-                if (!hasExternalDevice) {
-                    val speaker = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                    if (speaker != null) {
-                        am.setCommunicationDevice(speaker)
+                updateAudioRoutingApi31(am)
+                val callback = object : AudioDeviceCallback() {
+                    override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                        updateAudioRoutingApi31(am)
+                    }
+
+                    override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                        updateAudioRoutingApi31(am)
                     }
                 }
+                am.registerAudioDeviceCallback(callback, null)
+                audioDeviceCallback = callback
             } else {
                 @Suppress("DEPRECATION")
-                if (!am.isWiredHeadsetOn && !am.isBluetoothScoOn && !am.isBluetoothA2dpOn) {
+                val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(c: Context?, intent: Intent?) {
+                        val scoState = intent?.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
+                        if (scoState == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                            am.isBluetoothScoOn = true
+                            _state.update {
+                                it.copy(
+                                    isBluetoothHeadsetConnected = true,
+                                    activeAudioDeviceName = "Bluetooth Kulaklık",
+                                    statusNotice = "🎧 Bluetooth kulaklık bağlandı."
+                                )
+                            }
+                        } else if (scoState == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
+                            am.isBluetoothScoOn = false
+                            am.isSpeakerphoneOn = true
+                            _state.update {
+                                it.copy(
+                                    isBluetoothHeadsetConnected = false,
+                                    activeAudioDeviceName = "Hoparlör"
+                                )
+                            }
+                        }
+                    }
+                }
+                appCtx.registerReceiver(receiver, filter)
+                scoReceiver = receiver
+                runCatching {
+                    am.startBluetoothSco()
+                    am.isBluetoothScoOn = true
+                }
+                if (!am.isBluetoothScoOn && !am.isWiredHeadsetOn) {
                     am.isSpeakerphoneOn = true
                 }
             }
         }.onFailure { err ->
             Log.w(TAG, "AudioManager communication routing setup failed", err)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun updateAudioRoutingApi31(am: AudioManager) {
+        if (_state.value.isSpeakerForced) return
+        val devices = am.availableCommunicationDevices
+        val btDevice = devices.firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        }
+        val wired = devices.firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+        }
+        val selected = btDevice ?: wired
+        if (selected != null) {
+            val success = am.setCommunicationDevice(selected)
+            val name = selected.productName?.toString()?.takeIf { it.isNotBlank() }
+                ?: (if (btDevice != null) "Bluetooth Kulaklık" else "Kablolu Kulaklık")
+            _state.update {
+                it.copy(
+                    isBluetoothHeadsetConnected = btDevice != null,
+                    activeAudioDeviceName = name,
+                    statusNotice = if (success) "🎧 $name aktif (Giriş & Çıkış)." else it.statusNotice
+                )
+            }
+        } else {
+            val speaker = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            if (speaker != null) {
+                am.setCommunicationDevice(speaker)
+            }
+            _state.update {
+                it.copy(
+                    isBluetoothHeadsetConnected = false,
+                    activeAudioDeviceName = "Hoparlör"
+                )
+            }
         }
     }
 
@@ -670,8 +838,23 @@ class GeminiLiveTeacherManager {
 
         try {
             while (isActive && _state.value.isSessionActive) {
+                // Ensure AudioRecord is actively recording
+                if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                    runCatching { record.startRecording() }
+                }
+
                 val read = record.read(chunk, 0, chunk.size)
-                if (read <= 0) continue
+                if (read <= 0) {
+                    if (read < 0) {
+                        Log.w(TAG, "AudioRecord read error: $read, attempting restart")
+                        delay(40L)
+                        runCatching {
+                            record.stop()
+                            record.startRecording()
+                        }
+                    }
+                    continue
+                }
 
                 val stateSnapshot = _state.value
                 val now = SystemClock.elapsedRealtime()
@@ -684,10 +867,12 @@ class GeminiLiveTeacherManager {
                     continue
                 }
 
-                // Echo Guard: while the teacher's voice is coming out of speaker (+ tail),
-                // pause mic streaming so speaker output does NOT cause 2-word self-interruptions or phantom words.
+                val hasHeadset = stateSnapshot.isBluetoothHeadsetConnected
                 val teacherTalking = isTeacherSpeakingNow()
-                if (stateSnapshot.echoGuardEnabled && teacherTalking) {
+                // Echo Guard: only needed when sound is coming out of phone speaker (headset has no acoustic feedback loop)
+                val isEchoGuardActive = stateSnapshot.echoGuardEnabled && !hasHeadset && teacherTalking
+
+                if (isEchoGuardActive) {
                     preRollQueue.clear()
                     if (stateSnapshot.userAudioLevel != 0f) {
                         _state.update { it.copy(userAudioLevel = 0f) }
@@ -698,12 +883,15 @@ class GeminiLiveTeacherManager {
                 val payload = chunk.copyOf(read)
                 val level = computePcm16Rms(payload, read)
 
-                // Adaptive noise gate + pre-roll so ambient static does NOT hallucinate phantom transcripts
-                val speechThreshold = if (teacherTalking) BARGE_IN_SPEECH_RMS else NOISE_GATE_SPEECH_RMS
-                if (level >= speechThreshold) {
+                // When user recently unmuted, keep the gate open with grace window so speech is never dropped
+                val isUnmuteGrace = now < unmuteSpeechGraceUntilMs.get()
+                val baseThreshold = if (hasHeadset) NOISE_GATE_BT_SPEECH_RMS else NOISE_GATE_SPEECH_RMS
+                val speechThreshold = if (teacherTalking && !hasHeadset) BARGE_IN_SPEECH_RMS else baseThreshold
+
+                if (level >= speechThreshold || isUnmuteGrace) {
                     lastSpeechDetectedMs = now
                 }
-                val isGateOpen = (now - lastSpeechDetectedMs) <= SPEECH_HANGOVER_MS
+                val isGateOpen = isUnmuteGrace || ((now - lastSpeechDetectedMs) <= SPEECH_HANGOVER_MS)
 
                 if (now - lastUiMeterUpdateMs >= 90L) {
                     lastUiMeterUpdateMs = now
@@ -875,8 +1063,10 @@ class GeminiLiveTeacherManager {
                                 if (part.mimeType.startsWith("audio/pcm", ignoreCase = true) &&
                                     part.inlineData.isNotEmpty()
                                 ) {
-                                    forceBargeInWindowUntilMs.set(0L)
-                                    isReceivingTeacherAudio.set(true)
+                                    val now = SystemClock.elapsedRealtime()
+                                    if (now >= forceBargeInWindowUntilMs.get()) {
+                                        isReceivingTeacherAudio.set(true)
+                                    }
                                     queue.trySend(part.inlineData)
                                 }
                             }
@@ -999,14 +1189,21 @@ class GeminiLiveTeacherManager {
                     am.abandonAudioFocus(null)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    audioDeviceCallback?.let { cb -> am.unregisterAudioDeviceCallback(cb) }
                     am.clearCommunicationDevice()
                 } else {
+                    scoReceiver?.let { r -> runCatching { appContext?.unregisterReceiver(r) } }
+                    runCatching { am.stopBluetoothSco() }
+                    am.isBluetoothScoOn = false
                     @Suppress("DEPRECATION")
                     am.isSpeakerphoneOn = previousSpeakerphoneOn
                 }
                 am.mode = previousAudioMode
             }
         }
+        audioDeviceCallback = null
+        scoReceiver = null
+        appContext = null
         audioFocusRequest = null
         audioManager = null
     }
@@ -1120,8 +1317,9 @@ class GeminiLiveTeacherManager {
         const val APP_CHECK_TIMEOUT_MS = 10_000L
         const val CONNECT_TIMEOUT_MS = 15_000L
         const val SPEAKER_TAIL_HOLD_MS = 450L
-        const val NOISE_GATE_SPEECH_RMS = 0.018f
-        const val BARGE_IN_SPEECH_RMS = 0.065f
-        const val SPEECH_HANGOVER_MS = 750L
+        const val NOISE_GATE_SPEECH_RMS = 0.010f
+        const val NOISE_GATE_BT_SPEECH_RMS = 0.005f
+        const val BARGE_IN_SPEECH_RMS = 0.040f
+        const val SPEECH_HANGOVER_MS = 850L
     }
 }
