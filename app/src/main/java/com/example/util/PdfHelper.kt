@@ -144,7 +144,8 @@ object PdfHelper {
     suspend fun renderPdfSamplePages(
         localPath: String,
         focusPageOneBased: Int,
-        maxPages: Int = 4
+        maxPages: Int = 4,
+        targetWidthPx: Int = 860
     ): List<Pair<Int, Bitmap>> = withContext(Dispatchers.IO) {
         val file = File(localPath)
         if (!file.exists()) return@withContext emptyList()
@@ -164,10 +165,9 @@ object PdfHelper {
                 }
                 for (idx in indices.sorted().take(maxPages)) {
                     renderer.openPage(idx).use { page ->
-                        val targetWidth = 1080
-                        val scale = targetWidth.toFloat() / page.width.coerceAtLeast(1)
+                        val scale = targetWidthPx.toFloat() / page.width.coerceAtLeast(1)
                         val targetHeight = (page.height * scale).toInt().coerceAtLeast(1)
-                        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                        val bitmap = Bitmap.createBitmap(targetWidthPx, targetHeight, Bitmap.Config.ARGB_8888)
                         Canvas(bitmap).drawColor(Color.WHITE)
                         page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         result.add((idx + 1) to bitmap)

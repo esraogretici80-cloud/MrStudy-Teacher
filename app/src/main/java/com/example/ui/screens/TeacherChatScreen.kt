@@ -36,20 +36,23 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,9 +74,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,14 +107,19 @@ fun TeacherChatScreen(
     onDeleteSession: (String) -> Unit,
     onAttachImages: (List<Uri>) -> Unit,
     onRemoveImage: (Uri) -> Unit,
-    onSendMessage: (String, Boolean) -> Unit
+    onSendMessage: (String, Boolean) -> Unit,
+    onCancelStreaming: () -> Unit,
+    onDismissError: () -> Unit,
+    onOpenLiveLesson: () -> Unit
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     var inputText by remember { mutableStateOf("") }
     var bindActivePdf by remember(state.activePdfId) { mutableStateOf(state.activePdf != null) }
     var showSessionDialog by remember { mutableStateOf(false) }
     var showSubjectMenu by remember { mutableStateOf(false) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var copiedToken by remember(state.teacherAppCheckToken) { mutableStateOf(false) }
 
     val voiceSpeaker = remember(context) { TurkishVoiceSpeaker(context) }
     val speakingMsgId by voiceSpeaker.speakingMessageId.collectAsStateWithLifecycle()
@@ -195,6 +206,22 @@ fun TeacherChatScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        AssistChip(
+                            onClick = onOpenLiveLesson,
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.RecordVoiceOver,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            label = { Text("Canlı", maxLines = 1) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            ),
+                            modifier = Modifier.testTag("open_live_from_chat_button")
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
                         Box {
                             AssistChip(
                                 onClick = { showSubjectMenu = true },
@@ -288,12 +315,68 @@ fun TeacherChatScreen(
                 color = MaterialTheme.colorScheme.errorContainer,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = state.teacherError,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(12.dp)
-                )
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = state.teacherError,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onDismissError) {
+                            Text("Kapat")
+                        }
+                    }
+
+                    val debugToken = state.teacherAppCheckToken
+                    if (!debugToken.isNullOrBlank()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = debugToken,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                FilledTonalButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(debugToken))
+                                        copiedToken = true
+                                    },
+                                    modifier = Modifier.testTag("copy_debug_token_button")
+                                ) {
+                                    Icon(
+                                        Icons.Default.ContentCopy,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(if (copiedToken) "Kopyalandı" else "Debug Token'ı Kopyala")
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -478,26 +561,35 @@ fun TeacherChatScreen(
 
                 Spacer(modifier = Modifier.width(6.dp))
 
-                IconButton(
-                    onClick = {
-                        val text = inputText
-                        inputText = ""
-                        onSendMessage(text, bindActivePdf)
-                    },
-                    enabled = !state.isTeacherStreaming && (inputText.isNotBlank() || state.attachedImages.isNotEmpty()),
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .testTag("send_teacher_message_button")
-                ) {
-                    if (state.isTeacherStreaming) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp
+                if (state.isTeacherStreaming) {
+                    IconButton(
+                        onClick = onCancelStreaming,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error)
+                            .testTag("stop_teacher_message_button")
+                    ) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = "Yanıtı Durdur",
+                            tint = MaterialTheme.colorScheme.onError
                         )
-                    } else {
+                    }
+                } else {
+                    IconButton(
+                        onClick = {
+                            val text = inputText
+                            inputText = ""
+                            onSendMessage(text, bindActivePdf)
+                        },
+                        enabled = inputText.isNotBlank() || state.attachedImages.isNotEmpty(),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                            .testTag("send_teacher_message_button")
+                    ) {
                         Icon(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Gönder",

@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Style
@@ -113,6 +114,7 @@ fun PdfStudioScreen(
     onDeletePdf: (PdfResourceRecord) -> Unit,
     onAnalyzePdf: (Boolean) -> Unit,
     onTeachPageWithAi: (PdfResourceRecord, Int, TeachingMode, String) -> Unit,
+    onStartLiveFromPdf: (PdfResourceRecord, Int) -> Unit,
     onCreateExamFromPdf: (PdfResourceRecord) -> Unit,
     onCreateFlashcardsFromPdf: (PdfResourceRecord) -> Unit
 ) {
@@ -536,6 +538,19 @@ fun PdfStudioScreen(
                                         Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Bu Sayfayı Anlat")
+                                    }
+
+                                    FilledTonalButton(
+                                        onClick = {
+                                            onStartLiveFromPdf(activePdf, state.activePdfPage)
+                                        },
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("live_teach_pdf_page_button")
+                                    ) {
+                                        Icon(Icons.Default.RecordVoiceOver, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Canlı Sesli Anlat")
                                     }
 
                                     FilledTonalButton(

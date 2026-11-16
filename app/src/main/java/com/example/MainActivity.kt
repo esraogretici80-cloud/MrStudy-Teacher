@@ -67,6 +67,7 @@ import com.example.data.repository.MrStudyRepository
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.ExamCenterScreen
+import com.example.ui.screens.LiveLessonScreen
 import com.example.ui.screens.PdfStudioScreen
 import com.example.ui.screens.StudentProfileDialog
 import com.example.ui.screens.StudyHubScreen
@@ -153,6 +154,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val liveState by viewModel.liveState.collectAsStateWithLifecycle()
 
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -179,7 +181,9 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
         }
     }
 
-    if (currentRoute != "dashboard") {
+    val isLiveRoute = currentRoute == "live_lesson"
+
+    if (currentRoute != "dashboard" && !isLiveRoute) {
         BackHandler { navigateToTab("dashboard") }
     }
 
@@ -190,7 +194,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             contentWindowInsets = WindowInsets.safeDrawing,
             bottomBar = {
-                if (!useRail) {
+                if (!useRail && !isLiveRoute) {
                     NavigationBar {
                         mrStudyNavItems.forEach { item ->
                             val selected = currentRoute == item.route
@@ -215,7 +219,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                if (useRail) {
+                if (useRail && !isLiveRoute) {
                     NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
                         mrStudyNavItems.forEach { item ->
                             val selected = currentRoute == item.route
@@ -251,6 +255,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                 DashboardScreen(
                                     state = state,
                                     onOpenTeacher = { navigateToTab("teacher") },
+                                    onOpenLiveLesson = { navController.navigate("live_lesson") },
                                     onOpenPdfStudio = { navigateToTab("pdf") },
                                     onOpenExamCenter = { navigateToTab("exam") },
                                     onOpenStudyHub = { navigateToTab("study") },
@@ -273,7 +278,30 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onDeleteSession = viewModel::deleteChatSession,
                                     onAttachImages = { uris -> viewModel.attachImages(context, uris) },
                                     onRemoveImage = viewModel::removeAttachedImage,
-                                    onSendMessage = viewModel::sendTeacherMessage
+                                    onSendMessage = { text, bindPdf ->
+                                        viewModel.sendTeacherMessage(context, text, bindPdf)
+                                    },
+                                    onCancelStreaming = viewModel::cancelTeacherStream,
+                                    onDismissError = viewModel::dismissTeacherError,
+                                    onOpenLiveLesson = { navController.navigate("live_lesson") }
+                                )
+                            }
+
+                            composable("live_lesson") {
+                                LiveLessonScreen(
+                                    appState = state,
+                                    liveState = liveState,
+                                    onBack = { navController.popBackStack() },
+                                    onSelectSubject = viewModel::selectSubject,
+                                    onSelectVoice = viewModel::selectLiveVoice,
+                                    onStartLiveSession = { viewModel.startLiveLesson(context) },
+                                    onStopLiveSession = viewModel::stopLiveLesson,
+                                    onToggleMute = viewModel::toggleLiveMute,
+                                    onSendLiveText = viewModel::sendLiveText,
+                                    onSendLiveImageUri = { uri -> viewModel.sendLiveImageUri(context, uri) },
+                                    onSendActivePdfPage = viewModel::sendActivePdfPageToLive,
+                                    onSaveTranscriptAsNote = viewModel::saveLiveTranscriptAsNote,
+                                    onDismissError = viewModel::dismissLiveError
                                 )
                             }
 
@@ -296,7 +324,12 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                             page = page
                                         )
                                         navigateToTab("teacher")
-                                        viewModel.sendTeacherMessage(prompt, includeActivePdf = true)
+                                        viewModel.sendTeacherMessage(context, prompt, includeActivePdf = true)
+                                    },
+                                    onStartLiveFromPdf = { pdf, page ->
+                                        viewModel.selectSubject(pdf.subject)
+                                        viewModel.selectPdfAndLoadPage(pdf, page)
+                                        navController.navigate("live_lesson")
                                     },
                                     onCreateExamFromPdf = { pdf ->
                                         preselectedExamPdf = pdf

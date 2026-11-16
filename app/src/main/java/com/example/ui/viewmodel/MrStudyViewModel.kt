@@ -7,6 +7,9 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.friendlyFirestoreErrorMessage
+import com.example.core.getLocalAppCheckDebugToken
+import com.example.data.ai.GeminiLiveTeacherManager
+import com.example.data.ai.LiveLessonUiState
 import com.example.data.ai.MrStudyAiService
 import com.example.data.model.ChatSession
 import com.example.data.model.DailyLearningTask
@@ -28,6 +31,7 @@ import com.example.util.PdfHelper
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +40,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 class MrStudyViewModel(
     private val repository: MrStudyRepository,
@@ -48,8 +53,12 @@ class MrStudyViewModel(
     private val _uiState = MutableStateFlow(MrStudyUiState())
     val uiState: StateFlow<MrStudyUiState> = _uiState.asStateFlow()
 
+    private val liveManager = GeminiLiveTeacherManager()
+    val liveState: StateFlow<LiveLessonUiState> = liveManager.state
+
     private var messagesJob: Job? = null
     private var examTimerJob: Job? = null
+    private var teacherJob: Job? = null
 
     init {
         initializeUserData()
@@ -188,7 +197,19 @@ class MrStudyViewModel(
     }
 
     fun dismissBanner() {
-        _uiState.update { it.copy(statusBanner = null, teacherError = null, pdfError = null, examError = null) }
+        _uiState.update {
+            it.copy(
+                statusBanner = null,
+                teacherError = null,
+                teacherAppCheckToken = null,
+                pdfError = null,
+                examError = null
+            )
+        }
+    }
+
+    fun dismissTeacherError() {
+        _uiState.update { it.copy(teacherError = null, teacherAppCheckToken = null) }
     }
 
     fun setOnboardingVisible(visible: Boolean) {
@@ -346,11 +367,24 @@ class MrStudyViewModel(
         }
     }
 
-    fun sendTeacherMessage(promptText: String, includeActivePdf: Boolean = true) {
+    fun cancelTeacherStream() {
+        teacherJob?.cancel()
+        teacherJob = null
+        _uiState.update {
+            it.copy(
+                isTeacherStreaming = false,
+                streamingReply = ""
+            )
+        }
+    }
+
+    fun sendTeacherMessage(context: Context, promptText: String, includeActivePdf: Boolean = true) {
         val cleanPrompt = promptText.trim()
         if (cleanPrompt.isBlank() && _uiState.value.attachedImages.isEmpty()) return
 
-        viewModelScope.launch {
+        val appContext = context.applicationContext
+        teacherJob?.cancel()
+        teacherJob = viewModelScope.launch {
             val state = _uiState.value
             val effectivePrompt = cleanPrompt.ifBlank {
                 "Yüklediğim görseli analiz et. Matematik sorusuysa adım adım çöz; şema, grafik, tablo veya harita ise açıkla. Okunamayan alan varsa belirt."
@@ -364,21 +398,24 @@ class MrStudyViewModel(
                     isTeacherStreaming = true,
                     streamingReply = "",
                     teacherError = null,
+                    teacherAppCheckToken = null,
                     attachedImages = emptyList()
                 )
             }
 
             try {
-                val sessionId = state.activeSessionId ?: repository.createChatSession(
-                    userId = currentUserId,
-                    title = effectivePrompt.take(40),
-                    subject = state.selectedSubject,
-                    teachingMode = state.selectedMode.title,
-                    explanationDepth = state.selectedDepth.key,
-                    sourcePdfId = activePdf?.id.orEmpty(),
-                    sourcePdfTitle = activePdf?.title.orEmpty(),
-                    sourcePage = if (activePdf != null) activePage.toLong() else 0L
-                ).also { createdId ->
+                val sessionId = state.activeSessionId ?: withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    repository.createChatSession(
+                        userId = currentUserId,
+                        title = effectivePrompt.take(40),
+                        subject = state.selectedSubject,
+                        teachingMode = state.selectedMode.title,
+                        explanationDepth = state.selectedDepth.key,
+                        sourcePdfId = activePdf?.id.orEmpty(),
+                        sourcePdfTitle = activePdf?.title.orEmpty(),
+                        sourcePage = if (activePdf != null) activePage.toLong() else 0L
+                    )
+                }.also { createdId ->
                     _uiState.update { it.copy(activeSessionId = createdId) }
                     observeMessagesForSession(createdId)
                 }
@@ -391,18 +428,20 @@ class MrStudyViewModel(
                     }
                 }
 
-                repository.addChatMessage(
-                    userId = currentUserId,
-                    sessionId = sessionId,
-                    role = "user",
-                    content = effectivePrompt,
-                    teachingMode = state.selectedMode.title,
-                    hasAttachment = imagesToSend.isNotEmpty() || activePdf != null,
-                    attachmentLabel = attachmentSummary
-                )
+                withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    repository.addChatMessage(
+                        userId = currentUserId,
+                        sessionId = sessionId,
+                        role = "user",
+                        content = effectivePrompt,
+                        teachingMode = state.selectedMode.title,
+                        hasAttachment = imagesToSend.isNotEmpty() || activePdf != null,
+                        attachmentLabel = attachmentSummary
+                    )
+                }
 
-                val pdfSamples = if (activePdf != null) {
-                    PdfHelper.renderPdfSamplePages(activePdf.localUriString, activePage, maxPages = 3)
+                val pdfSamples = if (activePdf != null && PdfHelper.isLocalPdfAvailable(activePdf.localUriString)) {
+                    PdfHelper.renderPdfSamplePages(activePdf.localUriString, activePage, maxPages = 2)
                 } else {
                     emptyList()
                 }
@@ -417,43 +456,68 @@ class MrStudyViewModel(
                     recentHistory = state.messages,
                     attachedImages = imagesToSend.map { it.bitmap },
                     pdfPageSamples = pdfSamples,
-                    pdfTitle = activePdf?.title,
-                    activePdfPage = if (activePdf != null) activePage else null
+                    pdfTitle = if (pdfSamples.isNotEmpty()) activePdf?.title else null,
+                    activePdfPage = if (pdfSamples.isNotEmpty()) activePage else null
                 ).collect { partial ->
                     finalReply.clear()
                     finalReply.append(partial)
                     _uiState.update { it.copy(streamingReply = partial) }
                 }
 
-                val citation = if (activePdf != null) {
+                val citation = if (pdfSamples.isNotEmpty() && activePdf != null) {
                     "Kaynak: ${activePdf.title} (s.$activePage)"
                 } else {
                     "Genel Ders Anlatımı"
                 }
 
-                repository.addChatMessage(
-                    userId = currentUserId,
-                    sessionId = sessionId,
-                    role = "assistant",
-                    content = finalReply.toString(),
-                    teachingMode = state.selectedMode.title,
-                    sourceCitation = citation
-                )
+                withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    repository.addChatMessage(
+                        userId = currentUserId,
+                        sessionId = sessionId,
+                        role = "assistant",
+                        content = finalReply.toString(),
+                        teachingMode = state.selectedMode.title,
+                        sourceCitation = citation
+                    )
+                }
 
-                repository.awardProgress(
-                    userId = currentUserId,
-                    currentProfile = _uiState.value.profile,
-                    xpDelta = 15L,
-                    minutesDelta = 3L,
-                    questionsDelta = 1L,
-                    newBadge = if (_uiState.value.profile.questionsSolved >= 4) "Meraklı Öğrenci" else null
-                )
+                runCatching {
+                    withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                        repository.awardProgress(
+                            userId = currentUserId,
+                            currentProfile = _uiState.value.profile,
+                            xpDelta = 15L,
+                            minutesDelta = 3L,
+                            questionsDelta = 1L,
+                            newBadge = if (_uiState.value.profile.questionsSolved >= 4) "Meraklı Öğrenci" else null
+                        )
+                    }
+                }.onFailure { err ->
+                    if (err is CancellationException && err !is TimeoutCancellationException) throw err
+                    Log.w(TAG, "Progress update skipped after reply", err)
+                }
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Firestore operation timed out during chat", e)
+                _uiState.update {
+                    it.copy(
+                        teacherError = "Sunucu bağlantısı 15 saniye içinde yanıt vermedi. İnternetinizi kontrol edip tekrar deneyin."
+                    )
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed sending message", e)
+                val msg = e.localizedMessage ?: "Öğretmen yanıtı alınamadı."
+                val isAppCheckIssue = msg.contains("App Check", ignoreCase = true) ||
+                    msg.contains("appcheck", ignoreCase = true) ||
+                    msg.contains("403", ignoreCase = true) ||
+                    msg.contains("token", ignoreCase = true)
+                val debugToken = if (isAppCheckIssue) getLocalAppCheckDebugToken(appContext) else null
                 _uiState.update {
-                    it.copy(teacherError = e.localizedMessage ?: "Öğretmen yanıtı alınamadı.")
+                    it.copy(
+                        teacherError = msg,
+                        teacherAppCheckToken = debugToken
+                    )
                 }
             } finally {
                 _uiState.update { it.copy(isTeacherStreaming = false, streamingReply = "") }
@@ -1141,13 +1205,138 @@ class MrStudyViewModel(
         return uri.lastPathSegment ?: "PDF Kaynak"
     }
 
+    // --- Gemini Live Canlı Ders ---
+    fun selectLiveVoice(voiceId: String) {
+        liveManager.selectVoice(voiceId)
+    }
+
+    fun dismissLiveError() {
+        liveManager.clearError()
+    }
+
+    fun toggleLiveMute() {
+        liveManager.toggleMute()
+    }
+
+    fun startLiveLesson(context: Context) {
+        val state = _uiState.value
+        val activePdf = state.activePdf
+        liveManager.startSession(
+            scope = viewModelScope,
+            context = context,
+            profile = state.profile,
+            subject = state.selectedSubject,
+            teachingMode = state.selectedMode,
+            pdfTitle = activePdf?.title,
+            activePdfPage = if (activePdf != null) state.activePdfPage else null,
+            initialPdfBitmap = if (activePdf != null) state.renderedPdfPage else null
+        )
+    }
+
+    fun stopLiveLesson() {
+        val elapsed = liveManager.state.value.elapsedSeconds
+        liveManager.stopSession()
+        if (elapsed >= 20) {
+            val mins = (elapsed / 60).coerceAtLeast(1).toLong()
+            viewModelScope.launch {
+                runCatching {
+                    withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                        repository.awardProgress(
+                            userId = currentUserId,
+                            currentProfile = _uiState.value.profile,
+                            xpDelta = 25L,
+                            minutesDelta = mins,
+                            newBadge = "Canlı Ders Öğrencisi"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun sendLiveText(text: String) {
+        liveManager.sendTextDuringLive(text)
+    }
+
+    fun sendLiveImageUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val bmp = PdfHelper.decodeScaledBitmap(context, uri, maxDim = 960)
+                liveManager.sendVisualContextDuringLive(
+                    bitmap = bmp,
+                    label = "Soru Görseli",
+                    promptText = "Ekrana gönderdiğim bu soruyu/görseli incele ve sesli olarak adım adım anlat."
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = "Görsel canlı derse gönderilemedi: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    fun sendActivePdfPageToLive() {
+        val state = _uiState.value
+        val activePdf = state.activePdf ?: return
+        val page = state.activePdfPage
+        viewModelScope.launch {
+            try {
+                val bmp = state.renderedPdfPage
+                    ?: PdfHelper.renderPdfPage(activePdf.localUriString, (page - 1).coerceAtLeast(0), maxWidthPx = 960)
+                liveManager.sendVisualContextDuringLive(
+                    bitmap = bmp,
+                    label = "${activePdf.title} s.$page",
+                    promptText = "Öğrencinin PDF kaynağının $page. sayfasını görüyorsun. Bu sayfadaki ana konuyu ve varsa örnekleri canlı olarak anlat."
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = "PDF sayfası gönderilemedi: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    fun saveLiveTranscriptAsNote() {
+        val entries = liveManager.state.value.transcriptItems
+        if (entries.isEmpty()) return
+        val subject = _uiState.value.selectedSubject
+        val pdfTitle = _uiState.value.activePdf?.title.orEmpty()
+        val body = entries.joinToString("\n\n") { entry ->
+            val who = if (entry.isStudent) "Öğrenci" else "MrStudy Canlı"
+            "$who: ${entry.text}"
+        }
+        viewModelScope.launch {
+            try {
+                withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    repository.addNote(
+                        currentUserId,
+                        StudyNote(
+                            title = "Canlı Ders Notu - $subject",
+                            subject = subject,
+                            content = body,
+                            sourcePdfTitle = pdfTitle
+                        )
+                    )
+                }
+                _uiState.update { it.copy(statusBanner = "Canlı ders transkripti Çalışma Notlarına kaydedildi.") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        liveManager.stopSession()
+        teacherJob?.cancel()
         examTimerJob?.cancel()
         messagesJob?.cancel()
     }
 
     private companion object {
         const val TAG = "MrStudyViewModel"
+        const val FIRESTORE_WRITE_TIMEOUT_MS = 15_000L
     }
 }

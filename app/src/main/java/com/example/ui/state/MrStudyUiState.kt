@@ -53,6 +53,7 @@ data class MrStudyUiState(
     val isTeacherStreaming: Boolean = false,
     val streamingReply: String = "",
     val teacherError: String? = null,
+    val teacherAppCheckToken: String? = null,
 
     // PDF Studio
     val pdfSources: List<PdfResourceRecord> = emptyList(),
