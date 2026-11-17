@@ -12,6 +12,7 @@ import com.example.core.isAppCheckErrorMessage
 import com.example.data.ai.GeminiLiveTeacherManager
 import com.example.data.ai.LiveLessonUiState
 import com.example.data.ai.MrStudyAiService
+import com.example.data.local.LocalStudyMetricsStore
 import com.example.data.model.ChatSession
 import com.example.data.model.DailyLearningTask
 import com.example.data.model.ExamDifficulty
@@ -48,7 +49,8 @@ class MrStudyViewModel(
     private val aiService: MrStudyAiService,
     private val currentUserId: String,
     private val initialDisplayName: String,
-    private val initialEmail: String
+    private val initialEmail: String,
+    private val metricsStore: LocalStudyMetricsStore? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MrStudyUiState())
@@ -63,6 +65,16 @@ class MrStudyViewModel(
 
     init {
         initializeUserData()
+        observeLocalParentMetrics()
+    }
+
+    private fun observeLocalParentMetrics() {
+        val store = metricsStore ?: return
+        viewModelScope.launch {
+            store.metrics.collectLatest { local ->
+                _uiState.update { it.copy(parentMetrics = local) }
+            }
+        }
     }
 
     private fun initializeUserData() {
@@ -265,6 +277,31 @@ class MrStudyViewModel(
             } catch (e: Exception) {
                 _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
             }
+        }
+    }
+
+    fun switchGradeMode(targetGrade: String) {
+        val current = _uiState.value.profile
+        val updatedGoal = if (targetGrade.contains("6")) {
+            "Ortaokul 6. Sınıf Ders Başarısı"
+        } else {
+            "YKS (TYT + AYT) Yüksek Başarı"
+        }
+        val updated = current.copy(gradeLevel = targetGrade, targetGoal = updatedGoal)
+        _uiState.update { it.copy(profile = updated, statusBanner = "$targetGrade modu aktif edildi.") }
+        viewModelScope.launch {
+            runCatching {
+                withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    repository.updateProfile(currentUserId, updated)
+                }
+            }
+        }
+    }
+
+    fun updateParentPin(newPin: String) {
+        if (newPin.length == 4 && newPin.all { it.isDigit() }) {
+            metricsStore?.updateParentPin(newPin)
+            _uiState.update { it.copy(statusBanner = "Ebeveyn PIN şifresi güncellendi.") }
         }
     }
 
@@ -482,6 +519,7 @@ class MrStudyViewModel(
                     )
                 }
 
+                metricsStore?.recordQuestionSolved(state.selectedSubject, 1)
                 runCatching {
                     withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
                         repository.awardProgress(
@@ -878,6 +916,7 @@ class MrStudyViewModel(
                         wrongQuestionsSummary = summary.wrongQuestionsSummary
                     )
                 )
+                metricsStore?.recordQuestionSolved(summary.subject, summary.totalCount)
                 repository.awardProgress(
                     userId = currentUserId,
                     currentProfile = _uiState.value.profile,
@@ -1182,6 +1221,7 @@ class MrStudyViewModel(
     }
 
     fun awardMiniQuizXp(correctCount: Int) {
+        metricsStore?.recordQuestionSolved("Genel", 3)
         viewModelScope.launch {
             try {
                 repository.awardProgress(
@@ -1230,6 +1270,12 @@ class MrStudyViewModel(
     fun startLiveLesson(context: Context) {
         val state = _uiState.value
         val activePdf = state.activePdf
+        _uiState.update {
+            it.copy(
+                liveSessionEndedShowGameCta = false,
+                midLessonQuestion = null
+            )
+        }
         liveManager.startSession(
             scope = viewModelScope,
             context = context,
@@ -1246,8 +1292,23 @@ class MrStudyViewModel(
     }
 
     fun stopLiveLesson() {
-        val elapsed = liveManager.state.value.elapsedSeconds
+        val snapshot = liveManager.state.value
+        val elapsed = snapshot.elapsedSeconds
+        val hadActivity = elapsed >= 5 || snapshot.transcriptItems.isNotEmpty()
+        val lastTopic = snapshot.transcriptItems.lastOrNull { !it.isStudent }?.text?.take(80)
+            ?: _uiState.value.activePdf?.title
+            ?: _uiState.value.selectedSubject
         liveManager.stopSession()
+
+        if (elapsed >= 5) {
+            metricsStore?.recordLiveSession(_uiState.value.selectedSubject, elapsed, lastTopic)
+        }
+        _uiState.update {
+            it.copy(
+                liveSessionEndedShowGameCta = hadActivity,
+                game3dTopic = lastTopic
+            )
+        }
         if (elapsed >= 20) {
             val mins = (elapsed / 60).coerceAtLeast(1).toLong()
             viewModelScope.launch {
@@ -1432,6 +1493,200 @@ class MrStudyViewModel(
                 throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(statusBanner = friendlyFirestoreErrorMessage(e)) }
+            }
+        }
+    }
+
+    // --- MrStudy 3.0 Smart Board, Mid-Lesson Quiz, 3D Game & A4 Worksheet PDF ---
+    fun refreshLiveSmartBoard(topicHint: String = "") {
+        val state = _uiState.value
+        val live = liveManager.state.value
+        val contextHint = topicHint.ifBlank {
+            live.transcriptItems.takeLast(4).joinToString(" ") { it.text }
+                .ifBlank { state.activePdf?.title ?: state.selectedSubject }
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isGeneratingSmartBoard = true) }
+            try {
+                val payload = aiService.generateSmartBoardDrawing(
+                    topicOrTranscript = contextHint,
+                    subject = state.selectedSubject,
+                    gradeLevel = state.profile.gradeLevel
+                )
+                _uiState.update { it.copy(smartBoardState = payload) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = "Akıllı tahta güncellenemedi: ${e.localizedMessage}") }
+            } finally {
+                _uiState.update { it.copy(isGeneratingSmartBoard = false) }
+            }
+        }
+    }
+
+    fun triggerMidLessonQuestion() {
+        val state = _uiState.value
+        val live = liveManager.state.value
+        val transcript = live.transcriptItems.takeLast(4).joinToString(" ") { it.text }
+            .ifBlank { "${state.selectedSubject} dersi (${state.activePdf?.title ?: "Genel tekrar"})" }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMidQuestion = true) }
+            try {
+                val q = aiService.generateMidLessonQuestion(
+                    transcript = transcript,
+                    subject = state.selectedSubject,
+                    gradeLevel = state.profile.gradeLevel
+                )
+                _uiState.update { it.copy(midLessonQuestion = q) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = "Anlık soru üretilemedi: ${e.localizedMessage}") }
+            } finally {
+                _uiState.update { it.copy(isLoadingMidQuestion = false) }
+            }
+        }
+    }
+
+    fun answerMidLessonQuestion(isCorrect: Boolean) {
+        val subject = _uiState.value.selectedSubject
+        metricsStore?.recordQuestionSolved(subject, 1)
+        if (isCorrect) {
+            viewModelScope.launch {
+                runCatching {
+                    withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                        repository.awardProgress(
+                            userId = currentUserId,
+                            currentProfile = _uiState.value.profile,
+                            xpDelta = 15L,
+                            questionsDelta = 1L
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun dismissMidLessonQuestion() {
+        _uiState.update { it.copy(midLessonQuestion = null) }
+    }
+
+    fun load3dGameQuestions(customTopic: String = "") {
+        val state = _uiState.value
+        val live = liveManager.state.value
+        val topic = customTopic.ifBlank {
+            state.game3dTopic.ifBlank {
+                live.transcriptItems.lastOrNull { !it.isStudent }?.text?.take(60)
+                    ?: state.activePdf?.title
+                    ?: state.selectedSubject
+            }
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingGame3d = true, game3dTopic = topic, game3dQuestions = emptyList()) }
+            try {
+                val qs = aiService.generate3dGameQuestions(
+                    topic = topic,
+                    subject = state.selectedSubject,
+                    gradeLevel = state.profile.gradeLevel
+                )
+                _uiState.update { it.copy(game3dQuestions = qs) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = "3B oyun soruları üretilemedi: ${e.localizedMessage}") }
+            } finally {
+                _uiState.update { it.copy(isLoadingGame3d = false) }
+            }
+        }
+    }
+
+    fun record3dGameCompletion(correctCount: Int, totalCount: Int, score: Int) {
+        val subject = _uiState.value.selectedSubject
+        metricsStore?.record3dGameResult(subject, correctCount, totalCount, score)
+        viewModelScope.launch {
+            runCatching {
+                withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    repository.awardProgress(
+                        userId = currentUserId,
+                        currentProfile = _uiState.value.profile,
+                        xpDelta = (correctCount * 20L + 15L),
+                        minutesDelta = 2L,
+                        questionsDelta = totalCount.toLong(),
+                        newBadge = if (correctCount >= 4) "3B Uzay Kaşifi" else null
+                    )
+                }
+            }
+        }
+    }
+
+    fun exportChatWorksheetPdf(context: Context) {
+        val state = _uiState.value
+        val chatContext = state.messages.takeLast(8).joinToString("\n") {
+            val who = if (it.role == "user") "Öğrenci" else "Öğretmen"
+            "$who: ${it.content}"
+        }.ifBlank { "${state.selectedSubject} dersi genel konu özeti ve çalışma soruları." }
+        exportWorksheetFromContextInternal(
+            context = context,
+            title = "${state.selectedSubject} • Sohbet Çalışma Kağıdı",
+            subject = state.selectedSubject,
+            contextText = chatContext,
+            boardFormulas = state.smartBoardState?.formulas.orEmpty()
+        )
+    }
+
+    fun exportLiveWorksheetPdf(context: Context) {
+        val state = _uiState.value
+        val live = liveManager.state.value
+        val transcript = live.transcriptItems.takeLast(12).joinToString("\n") {
+            val who = if (it.isStudent) "Öğrenci" else "MrStudy Canlı"
+            "$who: ${it.text}"
+        }.ifBlank { state.smartBoardState?.summaryNote.orEmpty().ifBlank { "${state.selectedSubject} Canlı Ders Özeti" } }
+        exportWorksheetFromContextInternal(
+            context = context,
+            title = "${state.selectedSubject} • Canlı Ders Çalışma Kağıdı",
+            subject = state.selectedSubject,
+            contextText = transcript,
+            boardFormulas = state.smartBoardState?.formulas.orEmpty()
+        )
+    }
+
+    fun exportNoteWorksheetPdf(context: Context, note: StudyNote) {
+        val boardFormulas = (note.formulas + _uiState.value.smartBoardState?.formulas.orEmpty()).distinct()
+        exportWorksheetFromContextInternal(
+            context = context,
+            title = note.title,
+            subject = note.subject,
+            contextText = "${note.content}\nTanımlar: ${note.definitions.joinToString("; ")}",
+            boardFormulas = boardFormulas
+        )
+    }
+
+    private fun exportWorksheetFromContextInternal(
+        context: Context,
+        title: String,
+        subject: String,
+        contextText: String,
+        boardFormulas: List<String>
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExportingWorksheet = true) }
+            try {
+                val worksheet = aiService.generateWorksheetFromContext(
+                    title = title,
+                    subject = subject,
+                    gradeLevel = _uiState.value.profile.gradeLevel,
+                    contextText = contextText,
+                    boardFormulas = boardFormulas
+                )
+                val file = PdfHelper.exportWorksheetPdf(context, worksheet)
+                _uiState.update { it.copy(statusBanner = "A4 Çalışma Kağıdı hazırlandı ve İndirilenler'e kaydedildi.") }
+                PdfHelper.sharePdfFile(context, file)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(statusBanner = "Çalışma kağıdı PDF oluşturulamadı: ${e.localizedMessage}") }
+            } finally {
+                _uiState.update { it.copy(isExportingWorksheet = false) }
             }
         }
     }

@@ -34,10 +34,12 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,7 +74,13 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.model.DailyLearningTask
 import com.example.data.model.SubjectCatalog
+import com.example.ui.components.GlassCard
+import com.example.ui.components.GradeModeBadge
+import com.example.ui.components.MrStudy3Backdrop
 import com.example.ui.state.MrStudyUiState
+import com.example.ui.theme.CyberCyanTertiary
+import com.example.ui.theme.ElectricBlueSecondary
+import com.example.ui.theme.NeonPurplePrimary
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.WarningAmber
 
@@ -85,6 +93,8 @@ fun DashboardScreen(
     onOpenPdfStudio: () -> Unit,
     onOpenExamCenter: () -> Unit,
     onOpenStudyHub: () -> Unit,
+    onOpen3dGame: () -> Unit = {},
+    onSwitchGradeMode: (String) -> Unit = {},
     onToggleDailyTask: (DailyLearningTask) -> Unit,
     onLoadMiniQuiz: (String) -> Unit,
     onMiniQuizCompleted: (Int) -> Unit,
@@ -106,28 +116,54 @@ fun DashboardScreen(
     val bestSubject = subjectAverages.maxByOrNull { it.value }
     val weakSubject = subjectAverages.minByOrNull { it.value }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Header + Hero Card
-        item {
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    Image(
-                        painter = painterResource(id = R.drawable.img_hero_academy),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .matchParentSize()
-                            .clip(RoundedCornerShape(24.dp)),
-                        contentScale = ContentScale.Crop,
-                        alpha = 0.25f
-                    )
+    MrStudy3Backdrop {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header + Top Grade Mode Switcher Bar + Hero Glass Card
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "MrStudy 3.0",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = CyberCyanTertiary
+                            )
+                            Text(
+                                text = "Geleceğin Yapay Zekâ Akademisi",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        GradeModeBadge(
+                            currentGrade = profile.gradeLevel,
+                            onToggleGradeMode = onSwitchGradeMode
+                        )
+                    }
+
+                    GlassCard(
+                        accentBorder = NeonPurplePrimary,
+                        cornerRadius = 24.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Image(
+                                painter = painterResource(id = R.drawable.img_hero_academy),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clip(RoundedCornerShape(24.dp)),
+                                contentScale = ContentScale.Crop,
+                                alpha = 0.22f
+                            )
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -152,14 +188,14 @@ fun DashboardScreen(
                                     Text(
                                         text = "Merhaba, ${profile.displayName}!",
                                         style = MaterialTheme.typography.titleLarge,
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "${profile.gradeLevel} • Seviye ${profile.level} (${profile.xp} XP)",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -175,7 +211,7 @@ fun DashboardScreen(
                                     Icon(
                                         imageVector = if (profile.darkThemeMode == "dark") Icons.Default.LightMode else Icons.Default.DarkMode,
                                         contentDescription = "Tema Değiştir",
-                                        tint = MaterialTheme.colorScheme.onPrimary
+                                        tint = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                                 IconButton(
@@ -185,7 +221,7 @@ fun DashboardScreen(
                                     Icon(
                                         imageVector = Icons.Default.Person,
                                         contentDescription = "Öğrenci Profili",
-                                        tint = MaterialTheme.colorScheme.onPrimary
+                                        tint = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                             }
@@ -200,7 +236,7 @@ fun DashboardScreen(
                             Text(
                                 text = "Sonraki seviyeye ilerleme",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
                                 text = "${profile.streakDays} Gün Seri 🔥",
@@ -216,11 +252,12 @@ fun DashboardScreen(
                                 .fillMaxWidth()
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = MaterialTheme.colorScheme.secondary,
-                            trackColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.25f)
+                            color = CyberCyanTertiary,
+                            trackColor = Color.White.copy(alpha = 0.20f)
                         )
                     }
                 }
+            }
             }
         }
 
@@ -315,9 +352,40 @@ fun DashboardScreen(
                         }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = onOpenLiveLesson) {
+                    Button(
+                        onClick = onOpenLiveLesson,
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonPurplePrimary)
+                    ) {
                         Text("Başlat")
                     }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onOpen3dGame,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("quick_open_3d_game")
+                ) {
+                    Icon(Icons.Default.RocketLaunch, contentDescription = null, modifier = Modifier.size(16.dp), tint = CyberCyanTertiary)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("3B Eğitim Oyunu", maxLines = 1)
+                }
+                OutlinedButton(
+                    onClick = onOpenStudyHub,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("quick_open_study_hub")
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = ElectricBlueSecondary)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Notlar & Plan", maxLines = 1)
                 }
             }
         }
@@ -617,6 +685,7 @@ fun DashboardScreen(
                 }
             }
         }
+    }
     }
 }
 

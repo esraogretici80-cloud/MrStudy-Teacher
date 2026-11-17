@@ -2,53 +2,53 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Anatolian Academic Studio Palette — Light
-val NavyPrimary = Color(0xFF12314D)
+// MrStudy 3.0 Futuristic Space Palette (Dark Default)
+val SpaceBlackBackground = Color(0xFF0B0F19)
+val SpaceGlassSurface = Color(0xFF141B2D)
+val SpaceGlassVariant = Color(0xFF1E293B)
+val SpaceTextPrimary = Color(0xFFF1F5F9)
+val SpaceTextSecondary = Color(0xFF94A3B8)
+val SpaceGlassOutline = Color(0xFF334155)
+
+val NeonPurplePrimary = Color(0xFF8B5CF6)
+val OnNeonPurple = Color(0xFFFFFFFF)
+val NeonPurpleContainer = Color(0xFF2E1065)
+val OnNeonPurpleContainer = Color(0xFFEDE9FE)
+
+val ElectricBlueSecondary = Color(0xFF3B82F6)
+val OnElectricBlue = Color(0xFFFFFFFF)
+val ElectricBlueContainer = Color(0xFF1E3A8A)
+val OnElectricBlueContainer = Color(0xFFDBEAFE)
+
+val CyberCyanTertiary = Color(0xFF22D3EE)
+val OnCyberCyan = Color(0xFF042F2E)
+val CyberCyanContainer = Color(0xFF0E4A5C)
+val OnCyberCyanContainer = Color(0xFFCFFAFE)
+
+// Crisp Daylight Option (when explicitly toggled to light)
+val NavyPrimary = Color(0xFF5B21B6)
 val OnNavyPrimary = Color(0xFFFFFFFF)
-val NavyContainer = Color(0xFFD5E4F7)
-val OnNavyContainer = Color(0xFF0A1D33)
+val NavyContainer = Color(0xFFEDE9FE)
+val OnNavyContainer = Color(0xFF2E1065)
 
-val AmberSecondary = Color(0xFFD97706)
+val AmberSecondary = Color(0xFF2563EB)
 val OnAmberSecondary = Color(0xFFFFFFFF)
-val AmberContainer = Color(0xFFFEF3C7)
-val OnAmberContainer = Color(0xFF451A03)
+val AmberContainer = Color(0xFFDBEAFE)
+val OnAmberContainer = Color(0xFF1E3A8A)
 
-val TealTertiary = Color(0xFF0F766E)
+val TealTertiary = Color(0xFF0891B2)
 val OnTealTertiary = Color(0xFFFFFFFF)
-val TealContainer = Color(0xFFCCFBF1)
-val OnTealContainer = Color(0xFF042F2E)
+val TealContainer = Color(0xFFCFFAFE)
+val OnTealContainer = Color(0xFF083344)
 
-val ParchmentBackground = Color(0xFFF9F7F3)
-val OnParchment = Color(0xFF1A1C1E)
+val ParchmentBackground = Color(0xFFF8FAFC)
+val OnParchment = Color(0xFF0F172A)
 val WarmSurface = Color(0xFFFFFFFF)
-val WarmSurfaceVariant = Color(0xFFEDEAE2)
-val OnWarmSurfaceVariant = Color(0xFF474A52)
-val WarmOutline = Color(0xFFD2CEC3)
-
-// Dark Palette — Deep Obsidian Indigo
-val IndigoDarkPrimary = Color(0xFF93C5FD)
-val OnIndigoDarkPrimary = Color(0xFF072340)
-val IndigoDarkContainer = Color(0xFF1B3B5C)
-val OnIndigoDarkContainer = Color(0xFFD5E4F7)
-
-val GoldDarkSecondary = Color(0xFFFBBF24)
-val OnGoldDarkSecondary = Color(0xFF3E2200)
-val GoldDarkContainer = Color(0xFF593300)
-val OnGoldDarkContainer = Color(0xFFFEF3C7)
-
-val MintDarkTertiary = Color(0xFF5EEAD4)
-val OnMintDarkTertiary = Color(0xFF003733)
-val MintDarkContainer = Color(0xFF0F4C46)
-val OnMintDarkContainer = Color(0xFFCCFBF1)
-
-val ObsidianBackground = Color(0xFF0B1320)
-val OnObsidian = Color(0xFFEDF1F7)
-val ObsidianSurface = Color(0xFF121C2D)
-val ObsidianSurfaceVariant = Color(0xFF1D293D)
-val OnObsidianSurfaceVariant = Color(0xFFB5C0D0)
-val ObsidianOutline = Color(0xFF304057)
+val WarmSurfaceVariant = Color(0xFFE2E8F0)
+val OnWarmSurfaceVariant = Color(0xFF475569)
+val WarmOutline = Color(0xFFCBD5E1)
 
 // Semantic Status Colors
-val SuccessGreen = Color(0xFF16A34A)
+val SuccessGreen = Color(0xFF22C55E)
 val WarningAmber = Color(0xFFF59E0B)
-val DangerRed = Color(0xFFDC2626)
+val DangerRed = Color(0xFFEF4444)

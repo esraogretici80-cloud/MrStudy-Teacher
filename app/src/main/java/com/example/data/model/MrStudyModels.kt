@@ -317,3 +317,54 @@ data class MiniQuizQuestion(
     val correctIndex: Int,
     val explanation: String
 )
+
+enum class SmartBoardElementType {
+    TRIANGLE,
+    GRAPH,
+    FORMULA,
+    DIAGRAM;
+
+    companion object {
+        fun fromString(raw: String): SmartBoardElementType =
+            entries.firstOrNull { it.name.equals(raw.trim(), ignoreCase = true) } ?: FORMULA
+    }
+}
+
+data class SmartBoardElement(
+    val type: SmartBoardElementType = SmartBoardElementType.FORMULA,
+    val title: String = "",
+    val primaryText: String = "",
+    val labels: List<String> = emptyList(),
+    val values: List<Float> = emptyList()
+)
+
+data class SmartBoardPayload(
+    val boardTitle: String = "Dijital Akıllı Tahta",
+    val summaryNote: String = "",
+    val formulas: List<String> = emptyList(),
+    val elements: List<SmartBoardElement> = emptyList()
+)
+
+data class Game3dQuestion(
+    val prompt: String,
+    val options: List<String>,
+    val correctIndex: Int,
+    val explanation: String
+)
+
+data class WorksheetPracticeQuestion(
+    val number: Int,
+    val question: String,
+    val options: List<String> = emptyList(),
+    val answerKey: String
+)
+
+data class WorksheetData(
+    val title: String,
+    val subject: String,
+    val gradeLevel: String,
+    val summary: String,
+    val formulas: List<String>,
+    val questions: List<WorksheetPracticeQuestion>
+)
+

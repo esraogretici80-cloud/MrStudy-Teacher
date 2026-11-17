@@ -1,6 +1,5 @@
 package com.example.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -10,26 +9,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 
 private val MrStudyDarkColorScheme = darkColorScheme(
-    primary = IndigoDarkPrimary,
-    onPrimary = OnIndigoDarkPrimary,
-    primaryContainer = IndigoDarkContainer,
-    onPrimaryContainer = OnIndigoDarkContainer,
-    secondary = GoldDarkSecondary,
-    onSecondary = OnGoldDarkSecondary,
-    secondaryContainer = GoldDarkContainer,
-    onSecondaryContainer = OnGoldDarkContainer,
-    tertiary = MintDarkTertiary,
-    onTertiary = OnMintDarkTertiary,
-    tertiaryContainer = MintDarkContainer,
-    onTertiaryContainer = OnMintDarkContainer,
-    background = ObsidianBackground,
-    onBackground = OnObsidian,
-    surface = ObsidianSurface,
-    onSurface = OnObsidian,
-    surfaceVariant = ObsidianSurfaceVariant,
-    onSurfaceVariant = OnObsidianSurfaceVariant,
-    outline = ObsidianOutline,
-    error = DangerRed
+    primary = NeonPurplePrimary,
+    onPrimary = OnNeonPurple,
+    primaryContainer = NeonPurpleContainer,
+    onPrimaryContainer = OnNeonPurpleContainer,
+    secondary = ElectricBlueSecondary,
+    onSecondary = OnElectricBlue,
+    secondaryContainer = ElectricBlueContainer,
+    onSecondaryContainer = OnElectricBlueContainer,
+    tertiary = CyberCyanTertiary,
+    onTertiary = OnCyberCyan,
+    tertiaryContainer = CyberCyanContainer,
+    onTertiaryContainer = OnCyberCyanContainer,
+    background = SpaceBlackBackground,
+    onBackground = SpaceTextPrimary,
+    surface = SpaceGlassSurface,
+    onSurface = SpaceTextPrimary,
+    surfaceVariant = SpaceGlassVariant,
+    onSurfaceVariant = SpaceTextSecondary,
+    outline = SpaceGlassOutline,
+    error = DangerRed,
+    onError = OnNeonPurple
 )
 
 private val MrStudyLightColorScheme = lightColorScheme(
@@ -56,22 +56,19 @@ private val MrStudyLightColorScheme = lightColorScheme(
 )
 
 val MrStudyShapes = Shapes(
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
     extraLarge = RoundedCornerShape(28.dp)
 )
 
 @Composable
 fun MrStudyTheme(
-    themeMode: String = "system",
+    themeMode: String = "dark",
     content: @Composable () -> Unit
 ) {
-    val isDark = when (themeMode) {
-        "dark" -> true
-        "light" -> false
-        else -> isSystemInDarkTheme()
-    }
+    // MrStudy 3.0 defaults to the futuristic Space Black / Neon Purple dark look unless user picks "light"
+    val isDark = themeMode != "light"
     val colorScheme = if (isDark) MrStudyDarkColorScheme else MrStudyLightColorScheme
 
     MaterialTheme(

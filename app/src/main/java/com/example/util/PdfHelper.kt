@@ -1,5 +1,6 @@
 package com.example.util
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -7,13 +8,18 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.example.data.model.StudyNote
+import com.example.data.model.WorksheetData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -289,6 +295,209 @@ object PdfHelper {
             outFile
         }
 
+    suspend fun exportWorksheetPdf(context: Context, worksheet: WorksheetData): File =
+        withContext(Dispatchers.IO) {
+            val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+            val safeName = worksheet.title.replace(Regex("[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]"), "_").take(36)
+            val fileName = "MrStudy3_CalismaKagidi_${safeName}_${System.currentTimeMillis()}.pdf"
+            val outFile = File(exportDir, fileName)
+
+            val doc = PdfDocument()
+            val pageWidth = 595
+            val pageHeight = 842
+            val margin = 40f
+            val usableWidth = pageWidth - margin * 2
+
+            val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 18f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val brandSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(196, 181, 253)
+                textSize = 10.5f
+            }
+            val headerBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(15, 23, 42)
+            }
+            val accentStripePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(139, 92, 246)
+            }
+            val sectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(88, 28, 135)
+                textSize = 12.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(15, 23, 42)
+                textSize = 14.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(30, 41, 59)
+                textSize = 10.5f
+            }
+            val formulaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(30, 58, 138)
+                textSize = 10.5f
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            }
+            val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(203, 213, 225)
+                strokeWidth = 1f
+            }
+            val boxFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(245, 243, 255)
+            }
+
+            var pageNum = 1
+            var page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNum).create())
+            var canvas = page.canvas
+            var y = margin
+
+            fun drawHeaderBanner() {
+                canvas.drawRoundRect(
+                    RectF(margin, y, pageWidth - margin, y + 60f),
+                    12f,
+                    12f,
+                    headerBgPaint
+                )
+                canvas.drawRoundRect(
+                    RectF(margin, y, margin + 8f, y + 60f),
+                    4f,
+                    4f,
+                    accentStripePaint
+                )
+                canvas.drawText("MrStudy 3.0  •  Çalışma Kağıdı", margin + 20f, y + 26f, brandPaint)
+                canvas.drawText(
+                    "Ders: ${worksheet.subject}   •   Seviye: ${worksheet.gradeLevel}",
+                    margin + 20f,
+                    y + 45f,
+                    brandSubPaint
+                )
+                y += 78f
+            }
+
+            fun newPageIfNeeded(requiredHeight: Float = 20f) {
+                if (y + requiredHeight > pageHeight - margin) {
+                    doc.finishPage(page)
+                    pageNum++
+                    page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNum).create())
+                    canvas = page.canvas
+                    y = margin + 12f
+                }
+            }
+
+            fun drawWrappedText(text: String, paint: Paint, x: Float = margin, maxW: Float = usableWidth, lineHeight: Float = 15.5f) {
+                text.split("\n").forEach { paragraph ->
+                    if (paragraph.isBlank()) {
+                        y += lineHeight * 0.45f
+                        return@forEach
+                    }
+                    val words = paragraph.split(" ")
+                    var line = ""
+                    for (word in words) {
+                        val candidate = if (line.isEmpty()) word else "$line $word"
+                        if (paint.measureText(candidate) > maxW) {
+                            newPageIfNeeded(lineHeight)
+                            canvas.drawText(line, x, y, paint)
+                            y += lineHeight
+                            line = word
+                        } else {
+                            line = candidate
+                        }
+                    }
+                    if (line.isNotEmpty()) {
+                        newPageIfNeeded(lineHeight)
+                        canvas.drawText(line, x, y, paint)
+                        y += lineHeight
+                    }
+                }
+            }
+
+            drawHeaderBanner()
+            drawWrappedText(worksheet.title, titlePaint, lineHeight = 20f)
+            y += 6f
+
+            if (worksheet.summary.isNotBlank()) {
+                drawWrappedText("1. Ders Özeti", sectionPaint, lineHeight = 18f)
+                drawWrappedText(worksheet.summary, bodyPaint)
+                y += 10f
+            }
+
+            if (worksheet.formulas.isNotEmpty()) {
+                newPageIfNeeded(44f)
+                drawWrappedText("2. Akıllı Tahta Formülleri ve Kurallar", sectionPaint, lineHeight = 18f)
+                val boxStart = y - 8f
+                val boxHeight = (worksheet.formulas.size * 18f + 16f).coerceAtMost(200f)
+                canvas.drawRoundRect(
+                    RectF(margin, boxStart, pageWidth - margin, boxStart + boxHeight),
+                    8f,
+                    8f,
+                    boxFillPaint
+                )
+                y += 8f
+                worksheet.formulas.forEach { formula ->
+                    drawWrappedText("• $formula", formulaPaint, x = margin + 10f, maxW = usableWidth - 20f, lineHeight = 16f)
+                }
+                y += 12f
+            }
+
+            if (worksheet.questions.isNotEmpty()) {
+                newPageIfNeeded(32f)
+                drawWrappedText("3. Pratik Sorular (5 Soru)", sectionPaint, lineHeight = 18f)
+                y += 4f
+                worksheet.questions.forEachIndexed { idx, q ->
+                    newPageIfNeeded(48f)
+                    val qNum = if (q.number > 0) q.number else idx + 1
+                    drawWrappedText("$qNum) ${q.question}", titlePaint.apply { textSize = 11f }, lineHeight = 16f)
+                    q.options.forEachIndexed { oIdx, opt ->
+                        val prefix = ('A' + oIdx)
+                        val cleanOpt = opt.replace(Regex("^[A-Da-d][).:]\\s*"), "")
+                        drawWrappedText("    $prefix) $cleanOpt", bodyPaint, lineHeight = 14.5f)
+                    }
+                    y += 8f
+                }
+
+                // Bottom Answer Key Section
+                newPageIfNeeded(60f)
+                canvas.drawLine(margin, y, pageWidth - margin, y, dividerPaint)
+                y += 16f
+                drawWrappedText("CEVAP ANAHTARI", sectionPaint, lineHeight = 18f)
+                worksheet.questions.forEachIndexed { idx, q ->
+                    val qNum = if (q.number > 0) q.number else idx + 1
+                    drawWrappedText("$qNum: ${q.answerKey}", bodyPaint, lineHeight = 14.5f)
+                }
+            }
+
+            doc.finishPage(page)
+            FileOutputStream(outFile).use { doc.writeTo(it) }
+            doc.close()
+
+            saveCopyToPublicDownloads(context, outFile, fileName)
+            outFile
+        }
+
+    private fun saveCopyToPublicDownloads(context: Context, sourceFile: File, displayName: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        runCatching {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/MrStudy")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
+            resolver.openOutputStream(uri)?.use { out ->
+                sourceFile.inputStream().use { it.copyTo(out) }
+            }
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        }
+    }
+
     fun sharePdfFile(context: Context, file: File) {
         val uri = FileProvider.getUriForFile(
             context,
@@ -300,6 +509,6 @@ object PdfHelper {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Notu PDF Olarak Paylaş / Kaydet"))
+        context.startActivity(Intent.createChooser(intent, "MrStudy 3.0 PDF Olarak Paylaş / Kaydet"))
     }
 }

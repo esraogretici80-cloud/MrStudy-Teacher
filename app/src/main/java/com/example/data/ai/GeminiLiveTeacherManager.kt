@@ -124,10 +124,10 @@ data class LiveLessonUiState(
         const val FALLBACK_LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
         val voiceOptions = listOf(
-            LiveVoiceOption("AOEDE", "Aoede", "Sıcak ve akıcı öğretmen sesi"),
-            LiveVoiceOption("FENRIR", "Fenrir", "Net ve güçlü erkek öğretmen"),
-            LiveVoiceOption("CHARON", "Charon", "Sakin ve rehber ton"),
-            LiveVoiceOption("KORE", "Kore", "Enerjik konu anlatımı")
+            LiveVoiceOption("KORE", "Enerjik Öğretmen", "Canlı, tempolu ve motive edici anlatım"),
+            LiveVoiceOption("CHARON", "Sakin Rehber", "Dengeli, yumuşak ve sabırlı ton"),
+            LiveVoiceOption("AOEDE", "Genç Asistan", "Samimi, akıcı ve arkadaşça üslup"),
+            LiveVoiceOption("FENRIR", "Tok ve Ciddi Hoca", "Net, disiplinli ve sınav odaklı")
         )
     }
 }
@@ -361,15 +361,16 @@ class GeminiLiveTeacherManager {
             try {
                 ensureAppCheckReady()
 
+                val selectedVoice = _state.value.selectedVoice
                 val systemInstructionContent = buildLiveSystemInstruction(
                     profile = profile,
                     subject = subject,
                     mode = teachingMode,
+                    voiceId = selectedVoice,
                     pdfTitle = pdfTitle,
                     activePdfPage = activePdfPage
                 )
 
-                val selectedVoice = _state.value.selectedVoice
                 val echoGuard = _state.value.echoGuardEnabled
                 val (session, usedModel) = connectWithFallback(
                     voiceName = selectedVoice,
@@ -1219,9 +1220,15 @@ class GeminiLiveTeacherManager {
         profile: StudentProfile,
         subject: String,
         mode: TeachingMode,
+        voiceId: String,
         pdfTitle: String?,
         activePdfPage: Int?
     ): com.google.firebase.ai.type.Content {
+        val voicePersona = LiveLessonUiState.voiceOptions.firstOrNull { it.id == voiceId }
+        val voiceLine = if (voicePersona != null) {
+            "SES KARAKTERİN: ${voicePersona.label} (${voicePersona.description}). Tonunu ve temponu bu role uygun ayarla."
+        } else ""
+
         val pdfLine = if (!pdfTitle.isNullOrBlank()) {
             "Öğrencinin şu an açık olan PDF kaynağı: '$pdfTitle' (Sayfa ${activePdfPage ?: 1}). " +
                 "PDF görüntüsü gönderildiğinde yalnızca gördüğün bilgileri referans al, uydurma."
@@ -1236,6 +1243,7 @@ class GeminiLiveTeacherManager {
                 ÖĞRENCİ: ${profile.displayName}, Sınıf: ${profile.gradeLevel}, Hedef: ${profile.targetGoal}
                 DERS: $subject
                 ÖĞRETMEN MODU: ${mode.title} (${mode.promptGuidance})
+                $voiceLine
                 $pdfLine
 
                 CANLI DERS KURALLARI:

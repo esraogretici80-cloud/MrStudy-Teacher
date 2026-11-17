@@ -14,20 +14,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.Dashboard
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Quiz
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
@@ -44,8 +43,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -62,18 +63,23 @@ import com.example.core.authStateFlow
 import com.example.core.configureAppCheck
 import com.example.core.signOutUser
 import com.example.data.ai.MrStudyAiService
+import com.example.data.local.LocalStudyMetricsStore
 import com.example.data.model.PdfResourceRecord
 import com.example.data.repository.MrStudyRepository
 import com.example.ui.screens.AppCheckSetupDialog
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.ExamCenterScreen
+import com.example.ui.screens.Game3dScreen
 import com.example.ui.screens.LiveLessonScreen
+import com.example.ui.screens.ParentPanelScreen
 import com.example.ui.screens.PdfStudioScreen
 import com.example.ui.screens.StudentProfileDialog
 import com.example.ui.screens.StudyHubScreen
 import com.example.ui.screens.TeacherChatScreen
+import com.example.ui.theme.CyberCyanTertiary
 import com.example.ui.theme.MrStudyTheme
+import com.example.ui.theme.NeonPurplePrimary
 import com.example.ui.viewmodel.MrStudyViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -87,11 +93,10 @@ private data class NavDestinationItem(
 )
 
 private val mrStudyNavItems = listOf(
-    NavDestinationItem("dashboard", "Panel", Icons.Filled.Dashboard, Icons.Outlined.Dashboard),
-    NavDestinationItem("teacher", "Öğretmen", Icons.Filled.School, Icons.Outlined.School),
-    NavDestinationItem("pdf", "PDF", Icons.Filled.Description, Icons.Outlined.Description),
-    NavDestinationItem("exam", "Sınav", Icons.Filled.Quiz, Icons.Outlined.Quiz),
-    NavDestinationItem("study", "Çalışma", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth)
+    NavDestinationItem("dashboard", "Ana Sayfa", Icons.Filled.Home, Icons.Outlined.Home),
+    NavDestinationItem("live_lesson", "Canlı Ders", Icons.Filled.RecordVoiceOver, Icons.Outlined.RecordVoiceOver),
+    NavDestinationItem("teacher", "Sohbet", Icons.Filled.School, Icons.Outlined.School),
+    NavDestinationItem("parent", "Ebeveyn", Icons.Filled.Shield, Icons.Outlined.Shield)
 )
 
 class MainActivity : ComponentActivity() {
@@ -135,7 +140,8 @@ private fun AppRoot() {
                             aiService = MrStudyAiService(),
                             currentUserId = uid,
                             initialDisplayName = user.displayName ?: "Öğrenci",
-                            initialEmail = user.email.orEmpty()
+                            initialEmail = user.email.orEmpty(),
+                            metricsStore = LocalStudyMetricsStore(app, uid)
                         )
                     }
                 }
@@ -184,8 +190,10 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
     }
 
     val isLiveRoute = currentRoute == "live_lesson"
+    val isGame3dRoute = currentRoute == "game_3d"
+    val hideBottomChrome = isGame3dRoute || (isLiveRoute && liveState.isSessionActive)
 
-    if (currentRoute != "dashboard" && !isLiveRoute) {
+    if (currentRoute != "dashboard" && !isLiveRoute && !isGame3dRoute) {
         BackHandler { navigateToTab("dashboard") }
     }
 
@@ -196,8 +204,11 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             contentWindowInsets = WindowInsets.safeDrawing,
             bottomBar = {
-                if (!useRail && !isLiveRoute) {
-                    NavigationBar {
+                if (!useRail && !hideBottomChrome) {
+                    NavigationBar(
+                        containerColor = Color(0xFF0E1628).copy(alpha = 0.96f),
+                        contentColor = Color.White
+                    ) {
                         mrStudyNavItems.forEach { item ->
                             val selected = currentRoute == item.route
                             NavigationBarItem(
@@ -209,7 +220,14 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                         contentDescription = item.label
                                     )
                                 },
-                                label = { Text(item.label, maxLines = 1) }
+                                label = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = CyberCyanTertiary,
+                                    selectedTextColor = CyberCyanTertiary,
+                                    indicatorColor = NeonPurplePrimary.copy(alpha = 0.28f),
+                                    unselectedIconColor = Color(0xFF94A3B8),
+                                    unselectedTextColor = Color(0xFF94A3B8)
+                                )
                             )
                         }
                     }
@@ -221,7 +239,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                if (useRail && !isLiveRoute) {
+                if (useRail && !hideBottomChrome) {
                     NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
                         mrStudyNavItems.forEach { item ->
                             val selected = currentRoute == item.route
@@ -257,10 +275,15 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                 DashboardScreen(
                                     state = state,
                                     onOpenTeacher = { navigateToTab("teacher") },
-                                    onOpenLiveLesson = { navController.navigate("live_lesson") },
-                                    onOpenPdfStudio = { navigateToTab("pdf") },
-                                    onOpenExamCenter = { navigateToTab("exam") },
-                                    onOpenStudyHub = { navigateToTab("study") },
+                                    onOpenLiveLesson = { navigateToTab("live_lesson") },
+                                    onOpenPdfStudio = { navController.navigate("pdf") },
+                                    onOpenExamCenter = { navController.navigate("exam") },
+                                    onOpenStudyHub = { navController.navigate("study") },
+                                    onOpen3dGame = {
+                                        viewModel.load3dGameQuestions()
+                                        navController.navigate("game_3d")
+                                    },
+                                    onSwitchGradeMode = viewModel::switchGradeMode,
                                     onToggleDailyTask = viewModel::toggleDailyTask,
                                     onLoadMiniQuiz = viewModel::loadMiniQuiz,
                                     onMiniQuizCompleted = viewModel::awardMiniQuizXp,
@@ -285,7 +308,8 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     },
                                     onCancelStreaming = viewModel::cancelTeacherStream,
                                     onDismissError = viewModel::dismissTeacherError,
-                                    onOpenLiveLesson = { navController.navigate("live_lesson") },
+                                    onOpenLiveLesson = { navigateToTab("live_lesson") },
+                                    onExportWorksheet = { viewModel.exportChatWorksheetPdf(context) },
                                     onOpenAppCheckSetup = { showAppCheckSetupDialog = true }
                                 )
                             }
@@ -294,8 +318,9 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                 LiveLessonScreen(
                                     appState = state,
                                     liveState = liveState,
-                                    onBack = { navController.popBackStack() },
+                                    onBack = { navigateToTab("dashboard") },
                                     onSelectSubject = viewModel::selectSubject,
+                                    onSwitchGradeMode = viewModel::switchGradeMode,
                                     onSelectVoice = viewModel::selectLiveVoice,
                                     onToggleEchoGuard = viewModel::setLiveEchoGuardEnabled,
                                     onInterruptTeacher = viewModel::interruptLiveTeacher,
@@ -310,8 +335,36 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onSendLiveImageUri = { uri -> viewModel.sendLiveImageUri(context, uri) },
                                     onSendActivePdfPage = viewModel::sendActivePdfPageToLive,
                                     onSaveTranscriptAsNote = viewModel::saveLiveTranscriptAsNote,
+                                    onRefreshSmartBoard = { viewModel.refreshLiveSmartBoard() },
+                                    onTriggerMidQuestion = viewModel::triggerMidLessonQuestion,
+                                    onAnswerMidQuestion = viewModel::answerMidLessonQuestion,
+                                    onDismissMidQuestion = viewModel::dismissMidLessonQuestion,
+                                    onOpen3dGame = {
+                                        viewModel.load3dGameQuestions()
+                                        navController.navigate("game_3d")
+                                    },
+                                    onExportLiveWorksheet = { viewModel.exportLiveWorksheetPdf(context) },
                                     onDismissError = viewModel::dismissLiveError,
                                     onOpenAppCheckSetup = { showAppCheckSetupDialog = true }
+                                )
+                            }
+
+                            composable("parent") {
+                                ParentPanelScreen(
+                                    state = state,
+                                    onUpdatePin = viewModel::updateParentPin
+                                )
+                            }
+
+                            composable("game_3d") {
+                                Game3dScreen(
+                                    subject = state.selectedSubject,
+                                    topic = state.game3dTopic,
+                                    questions = state.game3dQuestions,
+                                    isLoading = state.isLoadingGame3d,
+                                    onReloadQuestions = { viewModel.load3dGameQuestions() },
+                                    onGameCompleted = viewModel::record3dGameCompletion,
+                                    onBack = { navController.popBackStack() }
                                 )
                             }
 
@@ -339,15 +392,15 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onStartLiveFromPdf = { pdf, page ->
                                         viewModel.selectSubject(pdf.subject)
                                         viewModel.selectPdfAndLoadPage(pdf, page)
-                                        navController.navigate("live_lesson")
+                                        navigateToTab("live_lesson")
                                     },
                                     onCreateExamFromPdf = { pdf ->
                                         preselectedExamPdf = pdf
-                                        navigateToTab("exam")
+                                        navController.navigate("exam")
                                     },
                                     onCreateFlashcardsFromPdf = { pdf ->
                                         viewModel.generateAiFlashcards(pdf.subject, pdf.title, pdf)
-                                        navigateToTab("study")
+                                        navController.navigate("study")
                                     }
                                 )
                             }
@@ -375,6 +428,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onSaveNote = viewModel::saveManualOrEditedNote,
                                     onDeleteNote = viewModel::deleteNote,
                                     onExportNotePdf = { note -> viewModel.exportNotePdf(context, note) },
+                                    onExportNoteWorksheet = { note -> viewModel.exportNoteWorksheetPdf(context, note) },
                                     onGenerateAiFlashcards = viewModel::generateAiFlashcards,
                                     onReviewFlashcard = viewModel::reviewFlashcard,
                                     onDeleteFlashcard = viewModel::deleteFlashcard

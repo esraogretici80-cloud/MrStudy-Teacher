@@ -2,6 +2,7 @@ package com.example.ui.state
 
 import android.graphics.Bitmap
 import android.net.Uri
+import com.example.data.local.LocalParentMetrics
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatSession
 import com.example.data.model.DailyLearningTask
@@ -9,9 +10,11 @@ import com.example.data.model.ExamRecord
 import com.example.data.model.ExamResultSummary
 import com.example.data.model.ExplanationDepth
 import com.example.data.model.FlashcardItem
+import com.example.data.model.Game3dQuestion
 import com.example.data.model.GeneratedExam
 import com.example.data.model.MiniQuizQuestion
 import com.example.data.model.PdfResourceRecord
+import com.example.data.model.SmartBoardPayload
 import com.example.data.model.StudentProfile
 import com.example.data.model.StudyNote
 import com.example.data.model.StudyPlanItem
@@ -85,6 +88,18 @@ data class MrStudyUiState(
     val dailyTasks: List<DailyLearningTask> = emptyList(),
     val miniQuizQuestions: List<MiniQuizQuestion> = emptyList(),
     val isLoadingMiniQuiz: Boolean = false,
+
+    // MrStudy 3.0: Live Smart Board, Mid-Lesson Quiz, 3D Game, Worksheet & Parent Panel
+    val smartBoardState: SmartBoardPayload? = null,
+    val isGeneratingSmartBoard: Boolean = false,
+    val midLessonQuestion: MiniQuizQuestion? = null,
+    val isLoadingMidQuestion: Boolean = false,
+    val liveSessionEndedShowGameCta: Boolean = false,
+    val game3dQuestions: List<Game3dQuestion> = emptyList(),
+    val game3dTopic: String = "",
+    val isLoadingGame3d: Boolean = false,
+    val isExportingWorksheet: Boolean = false,
+    val parentMetrics: LocalParentMetrics = LocalParentMetrics(),
 
     // Global banner/feedback
     val statusBanner: String? = null

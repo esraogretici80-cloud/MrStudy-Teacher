@@ -68,6 +68,7 @@ import com.example.data.model.PdfResourceRecord
 import com.example.data.model.StudyNote
 import com.example.data.model.StudyPlanItem
 import com.example.data.model.SubjectCatalog
+import com.example.ui.components.MrStudy3Backdrop
 import com.example.ui.state.MrStudyUiState
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.WarningAmber
@@ -84,6 +85,7 @@ fun StudyHubScreen(
     onSaveNote: (StudyNote) -> Unit,
     onDeleteNote: (String) -> Unit,
     onExportNotePdf: (StudyNote) -> Unit,
+    onExportNoteWorksheet: (StudyNote) -> Unit = onExportNotePdf,
     onGenerateAiFlashcards: (String, String, PdfResourceRecord?) -> Unit,
     onReviewFlashcard: (FlashcardItem, Boolean) -> Unit,
     onDeleteFlashcard: (String) -> Unit
@@ -91,39 +93,42 @@ fun StudyHubScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Çalışma Planı", "Akıllı Notlar", "Bilgi Kartları")
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedTab) {
-            tabs.forEachIndexed { idx, title ->
-                Tab(
-                    selected = selectedTab == idx,
-                    onClick = { selectedTab = idx },
-                    text = { Text(title, maxLines = 1) }
+    MrStudy3Backdrop {
+        Column(modifier = Modifier.fillMaxSize()) {
+            TabRow(selectedTabIndex = selectedTab) {
+                tabs.forEachIndexed { idx, title ->
+                    Tab(
+                        selected = selectedTab == idx,
+                        onClick = { selectedTab = idx },
+                        text = { Text(title, maxLines = 1) }
+                    )
+                }
+            }
+
+            when (selectedTab) {
+                0 -> StudyPlansTab(
+                    state = state,
+                    onAddPlan = onAddPlan,
+                    onGenerateAiPlan = onGenerateAiPlan,
+                    onTogglePlan = onTogglePlan,
+                    onPostponePlan = onPostponePlan,
+                    onDeletePlan = onDeletePlan
+                )
+                1 -> SmartNotesTab(
+                    state = state,
+                    onGenerateAiNote = onGenerateAiNote,
+                    onSaveNote = onSaveNote,
+                    onDeleteNote = onDeleteNote,
+                    onExportNotePdf = onExportNotePdf,
+                    onExportNoteWorksheet = onExportNoteWorksheet
+                )
+                2 -> FlashcardsTab(
+                    state = state,
+                    onGenerateAiFlashcards = onGenerateAiFlashcards,
+                    onReviewFlashcard = onReviewFlashcard,
+                    onDeleteFlashcard = onDeleteFlashcard
                 )
             }
-        }
-
-        when (selectedTab) {
-            0 -> StudyPlansTab(
-                state = state,
-                onAddPlan = onAddPlan,
-                onGenerateAiPlan = onGenerateAiPlan,
-                onTogglePlan = onTogglePlan,
-                onPostponePlan = onPostponePlan,
-                onDeletePlan = onDeletePlan
-            )
-            1 -> SmartNotesTab(
-                state = state,
-                onGenerateAiNote = onGenerateAiNote,
-                onSaveNote = onSaveNote,
-                onDeleteNote = onDeleteNote,
-                onExportNotePdf = onExportNotePdf
-            )
-            2 -> FlashcardsTab(
-                state = state,
-                onGenerateAiFlashcards = onGenerateAiFlashcards,
-                onReviewFlashcard = onReviewFlashcard,
-                onDeleteFlashcard = onDeleteFlashcard
-            )
         }
     }
 }
@@ -396,7 +401,8 @@ private fun SmartNotesTab(
     onGenerateAiNote: (String, String, PdfResourceRecord?) -> Unit,
     onSaveNote: (StudyNote) -> Unit,
     onDeleteNote: (String) -> Unit,
-    onExportNotePdf: (StudyNote) -> Unit
+    onExportNotePdf: (StudyNote) -> Unit,
+    onExportNoteWorksheet: (StudyNote) -> Unit
 ) {
     var filterSubject by remember { mutableStateOf("Tümü") }
     var editingNote by remember { mutableStateOf<StudyNote?>(null) }
@@ -548,6 +554,22 @@ private fun SmartNotesTab(
                                     AssistChip(onClick = {}, label = { Text(k, style = MaterialTheme.typography.labelSmall) })
                                 }
                             }
+                        }
+
+                        FilledTonalButton(
+                            onClick = { onExportNoteWorksheet(note) },
+                            enabled = !state.isExportingWorksheet,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("export_note_worksheet_button")
+                        ) {
+                            if (state.isExportingWorksheet) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("PDF Çalışma Kağıdı İndir (A4 • 5 Soru)")
                         }
                     }
                 }

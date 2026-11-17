@@ -10,13 +10,19 @@ import com.example.data.model.ExamQuestion
 import com.example.data.model.ExamResultSummary
 import com.example.data.model.ExplanationDepth
 import com.example.data.model.FlashcardItem
+import com.example.data.model.Game3dQuestion
 import com.example.data.model.GeneratedExam
 import com.example.data.model.MiniQuizQuestion
 import com.example.data.model.QuestionType
+import com.example.data.model.SmartBoardElement
+import com.example.data.model.SmartBoardElementType
+import com.example.data.model.SmartBoardPayload
 import com.example.data.model.StudentProfile
 import com.example.data.model.StudyNote
 import com.example.data.model.StudyPlanItem
 import com.example.data.model.TeachingMode
+import com.example.data.model.WorksheetData
+import com.example.data.model.WorksheetPracticeQuestion
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Content
@@ -80,17 +86,25 @@ class MrStudyAiService {
         )
     }
 
-    private val primaryChatModel by lazy {
+    private val tier1ChatModel by lazy {
         Firebase.ai.generativeModel(
-            modelName = PRIMARY_TEXT_MODEL,
+            modelName = MODEL_TIER_1,
             generationConfig = teacherGenerationConfig,
             systemInstruction = buildSystemInstruction()
         )
     }
 
-    private val fallbackChatModel by lazy {
+    private val tier2ChatModel by lazy {
         Firebase.ai.generativeModel(
-            modelName = FALLBACK_TEXT_MODEL,
+            modelName = MODEL_TIER_2,
+            generationConfig = teacherGenerationConfig,
+            systemInstruction = buildSystemInstruction()
+        )
+    }
+
+    private val tier3ChatModel by lazy {
+        Firebase.ai.generativeModel(
+            modelName = MODEL_TIER_3,
             generationConfig = teacherGenerationConfig,
             systemInstruction = buildSystemInstruction()
         )
@@ -132,6 +146,9 @@ class MrStudyAiService {
             chain.contains("ResourceExhausted", ignoreCase = true) ||
             chain.contains("rate limit", ignoreCase = true) ||
             chain.contains("temporarily unavailable", ignoreCase = true) ||
+            chain.contains("not found", ignoreCase = true) ||
+            chain.contains("404", ignoreCase = true) ||
+            chain.contains("unsupported", ignoreCase = true) ||
             chain.contains("503", ignoreCase = true) ||
             chain.contains("500", ignoreCase = true) ||
             chain.contains("FirstChunkTimeout", ignoreCase = true) ||
@@ -204,25 +221,35 @@ class MrStudyAiService {
         promptContent: Content
     ): String {
         ensureAppCheckReady()
+        val tiers = listOf(MODEL_TIER_1, MODEL_TIER_2, MODEL_TIER_3)
         return withTimeout(AI_TOTAL_TIMEOUT_MS) {
-            try {
-                val primary = structuredModel(PRIMARY_TEXT_MODEL, schema)
-                val res = primary.generateContent(promptContent)
-                res.text ?: throw IllegalStateException("Model boş yanıt döndürdü.")
-            } catch (e: CancellationException) {
-                if (e is TimeoutCancellationException) throw mapAiError(e)
-                throw e
-            } catch (e: Exception) {
-                if (isQuotaOrTransientError(e)) {
-                    Log.w(TAG, "Primary structured model hit quota/transient error, falling back to $FALLBACK_TEXT_MODEL", e)
-                    delay(800L)
-                    val fallback = structuredModel(FALLBACK_TEXT_MODEL, schema)
-                    val res = fallback.generateContent(promptContent)
-                    res.text ?: throw IllegalStateException("Yedek model boş yanıt döndürdü.")
-                } else {
-                    throw mapAiError(e)
+            var lastError: Exception? = null
+            for ((index, modelId) in tiers.withIndex()) {
+                try {
+                    val model = structuredModel(modelId, schema)
+                    val res = model.generateContent(promptContent)
+                    return@withTimeout res.text ?: throw IllegalStateException("$modelId boş yanıt döndürdü.")
+                } catch (e: CancellationException) {
+                    if (e is TimeoutCancellationException) {
+                        lastError = mapAiError(e)
+                    } else {
+                        throw e
+                    }
+                } catch (e: Exception) {
+                    lastError = e
+                    val hasNext = index < tiers.lastIndex
+                    if (hasNext && isQuotaOrTransientError(e)) {
+                        Log.w(TAG, "Structured tier $modelId failed (${e.message}); cascading to ${tiers[index + 1]}", e)
+                        delay(400L)
+                        continue
+                    } else if (!hasNext) {
+                        throw mapAiError(e)
+                    } else {
+                        throw mapAiError(e)
+                    }
                 }
             }
+            throw mapAiError(lastError ?: IllegalStateException("Tüm yapay zekâ katmanları yanıt veremedi."))
         }
     }
 
@@ -286,59 +313,70 @@ class MrStudyAiService {
 
         val accumulated = StringBuilder()
         val receivedFirstChunk = AtomicBoolean(false)
+        val chatTiers = listOf(
+            MODEL_TIER_1 to tier1ChatModel,
+            MODEL_TIER_2 to tier2ChatModel,
+            MODEL_TIER_3 to tier3ChatModel
+        )
 
         try {
             withTimeout(AI_TOTAL_TIMEOUT_MS) {
-                coroutineScope {
-                    var fallbackRequired = false
-                    val firstChunkWatchdog = launch {
-                        delay(FIRST_CHUNK_TIMEOUT_MS)
-                        if (!receivedFirstChunk.get()) {
-                            Log.w(TAG, "Primary model first chunk timed out ($FIRST_CHUNK_TIMEOUT_MS ms), triggering fallback")
-                            fallbackRequired = true
-                            throw FirstChunkTimeoutException()
-                        }
-                    }
-
+                var lastErr: Exception? = null
+                for ((idx, tierPair) in chatTiers.withIndex()) {
+                    val (tierName, model) = tierPair
+                    if (receivedFirstChunk.get()) break
+                    val hasNext = idx < chatTiers.lastIndex
                     try {
-                        primaryChatModel.generateContentStream(inputContent).collect { chunk ->
-                            val piece = chunk.text.orEmpty()
-                            if (piece.isNotEmpty()) {
-                                if (receivedFirstChunk.compareAndSet(false, true)) {
-                                    firstChunkWatchdog.cancel()
+                        coroutineScope {
+                            var fallbackRequired = false
+                            val firstChunkWatchdog = launch {
+                                delay(FIRST_CHUNK_TIMEOUT_MS)
+                                if (!receivedFirstChunk.get()) {
+                                    Log.w(TAG, "Tier $tierName first chunk timed out ($FIRST_CHUNK_TIMEOUT_MS ms)")
+                                    fallbackRequired = true
+                                    throw FirstChunkTimeoutException()
                                 }
-                                accumulated.append(piece)
-                                emit(accumulated.toString())
+                            }
+                            try {
+                                model.generateContentStream(inputContent).collect { chunk ->
+                                    val piece = chunk.text.orEmpty()
+                                    if (piece.isNotEmpty()) {
+                                        if (receivedFirstChunk.compareAndSet(false, true)) {
+                                            firstChunkWatchdog.cancel()
+                                        }
+                                        accumulated.append(piece)
+                                        emit(accumulated.toString())
+                                    }
+                                }
+                            } catch (inner: Exception) {
+                                firstChunkWatchdog.cancel()
+                                if (inner is CancellationException && inner !is TimeoutCancellationException && !fallbackRequired) {
+                                    throw inner
+                                }
+                                throw inner
+                            } finally {
+                                firstChunkWatchdog.cancel()
                             }
                         }
+                        if (receivedFirstChunk.get() || accumulated.isNotBlank()) break
+                    } catch (e: CancellationException) {
+                        if (e is TimeoutCancellationException && !receivedFirstChunk.get() && hasNext) {
+                            lastErr = e
+                            Log.w(TAG, "Timeout on $tierName, cascading to ${chatTiers[idx + 1].first}")
+                            continue
+                        }
+                        throw e
                     } catch (e: Exception) {
-                        firstChunkWatchdog.cancel()
-                        if (e is CancellationException && e !is TimeoutCancellationException && !fallbackRequired) {
-                            throw e
+                        lastErr = e
+                        if (!receivedFirstChunk.get() && hasNext && isQuotaOrTransientError(e)) {
+                            Log.w(TAG, "Quota/transient on $tierName, cascading to ${chatTiers[idx + 1].first}", e)
+                            delay(450L)
+                            continue
                         }
-
-                        // If no chunks were received yet and it's a quota, timeout, or transient error,
-                        // seamlessly stream from fallback model (gemini-3.5-flash-lite)
-                        if (!receivedFirstChunk.get() && (fallbackRequired || isQuotaOrTransientError(e))) {
-                            Log.w(TAG, "Seamlessly switching to fallback model: $FALLBACK_TEXT_MODEL", e)
-                            if (e.message?.contains("429", ignoreCase = true) == true) {
-                                delay(600L)
-                            }
-                            fallbackChatModel.generateContentStream(inputContent).collect { chunk ->
-                                val piece = chunk.text.orEmpty()
-                                if (piece.isNotEmpty()) {
-                                    receivedFirstChunk.set(true)
-                                    accumulated.append(piece)
-                                    emit(accumulated.toString())
-                                }
-                            }
-                        } else {
-                            throw e
-                        }
-                    } finally {
-                        firstChunkWatchdog.cancel()
+                        throw e
                     }
                 }
+                if (accumulated.isBlank() && lastErr != null) throw lastErr
             }
 
             if (accumulated.isBlank()) {
@@ -782,6 +820,199 @@ class MrStudyAiService {
         }
     }
 
+    suspend fun generateSmartBoardDrawing(
+        topicOrTranscript: String,
+        subject: String,
+        gradeLevel: String
+    ): SmartBoardPayload {
+        val elemSchema = Schema.obj(
+            properties = mapOf(
+                "type" to Schema.enumeration(listOf("TRIANGLE", "GRAPH", "FORMULA", "DIAGRAM"), "Çizim tipi"),
+                "title" to Schema.string("Kısa başlık (en fazla 4 kelime)"),
+                "primaryText" to Schema.string("Ana formül, denklem veya özet metin"),
+                "labels" to Schema.array(Schema.string(), "Köşe, eksen veya düğüm etiketleri (en fazla 4 etiket)"),
+                "values" to Schema.array(Schema.double(), "Grafik veya üçgen değerleri (en fazla 5 sayı)")
+            )
+        )
+        val rootSchema = Schema.obj(
+            properties = mapOf(
+                "boardTitle" to Schema.string("Tahta ana başlığı"),
+                "summaryNote" to Schema.string("1 cümlelik net ders notu"),
+                "formulas" to Schema.array(Schema.string(), "En fazla 3 kritik formül veya kural"),
+                "elements" to Schema.array(elemSchema, "1 veya 2 görsel tahta çizim öğesi")
+            )
+        )
+        val promptContent = content {
+            text(
+                """
+                Sen MrStudy Akıllı Tahta JSON motorusun. Minimum token ile net görsel şema üret.
+                Sınıf: $gradeLevel, Ders: $subject
+                Konu / Anlatım: ${topicOrTranscript.take(600)}
+                Kurallar:
+                - Matematik/Geometri üçgen ise type='TRIANGLE', labels=['A','B','C'] vb. ver.
+                - Fonksiyon/veri ise type='GRAPH', values içinde 4-5 örnek nokta değeri ver.
+                - Denklem/Fizik/Kimya ise type='FORMULA' kullan.
+                - Süreç/Tarih/Fen kavram akışı ise type='DIAGRAM', labels içine 3 kısa adım adı yaz.
+                """.trimIndent()
+            )
+        }
+        val raw = executeStructuredWithFallback(rootSchema, promptContent)
+        val json = JSONObject(raw)
+        val formulas = json.optJSONArray("formulas")?.let { arr ->
+            (0 until arr.length()).map { arr.getString(it) }
+        } ?: emptyList()
+        val elementsArr = json.optJSONArray("elements")
+        val elements = if (elementsArr != null) {
+            (0 until elementsArr.length()).map { i ->
+                val o = elementsArr.getJSONObject(i)
+                val labels = o.optJSONArray("labels")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+                val values = o.optJSONArray("values")?.let { a -> (0 until a.length()).map { a.optDouble(it, 0.0).toFloat() } } ?: emptyList()
+                SmartBoardElement(
+                    type = SmartBoardElementType.fromString(o.optString("type", "FORMULA")),
+                    title = o.optString("title", ""),
+                    primaryText = o.optString("primaryText", ""),
+                    labels = labels,
+                    values = values
+                )
+            }
+        } else {
+            emptyList()
+        }
+        return SmartBoardPayload(
+            boardTitle = json.optString("boardTitle", "$subject • Akıllı Tahta"),
+            summaryNote = json.optString("summaryNote", ""),
+            formulas = formulas,
+            elements = elements
+        )
+    }
+
+    suspend fun generateMidLessonQuestion(
+        transcript: String,
+        subject: String,
+        gradeLevel: String
+    ): MiniQuizQuestion {
+        val schema = Schema.obj(
+            properties = mapOf(
+                "question" to Schema.string("Anlatılan konuyla ilgili kısa tek soruluk anlık kontrol sorusu"),
+                "options" to Schema.array(Schema.string(), "Tam 4 kısa şık"),
+                "correctIndex" to Schema.integer("Doğru şık indeksi (0-3)"),
+                "explanation" to Schema.string("Tek cümlelik tebrik ve çözüm özeti")
+            )
+        )
+        val promptContent = content {
+            text(
+                "Sınıf: $gradeLevel, Ders: $subject. Canlı dersteki şu anlatıma göre öğrenciyi sıkmayan 1 kısa kontrol sorusu üret: ${transcript.take(500)}"
+            )
+        }
+        val raw = executeStructuredWithFallback(schema, promptContent)
+        val o = JSONObject(raw)
+        val optsArr = o.getJSONArray("options")
+        val opts = (0 until optsArr.length()).map { optsArr.getString(it) }
+        return MiniQuizQuestion(
+            question = o.getString("question"),
+            options = opts,
+            correctIndex = o.optInt("correctIndex", 0).coerceIn(0, (opts.size - 1).coerceAtLeast(0)),
+            explanation = o.optString("explanation", "")
+        )
+    }
+
+    suspend fun generate3dGameQuestions(
+        topic: String,
+        subject: String,
+        gradeLevel: String
+    ): List<Game3dQuestion> {
+        val qSchema = Schema.obj(
+            properties = mapOf(
+                "prompt" to Schema.string("3B oyun ekranına sığacak kısa net soru (en fazla 14 kelime)"),
+                "options" to Schema.array(Schema.string(), "Tam 4 çok kısa şık (A, B, C, D için en fazla 3 kelime)"),
+                "correctIndex" to Schema.integer("Doğru şık indeksi (0-3)"),
+                "explanation" to Schema.string("1 kısa cümlelik geri bildirim")
+            )
+        )
+        val rootSchema = Schema.obj(
+            properties = mapOf("questions" to Schema.array(qSchema, "Tam 5 adet hızlı oyun sorusu"))
+        )
+        val promptContent = content {
+            text(
+                "Minimum token ile $gradeLevel düzeyi '$subject - $topic' konusu için 5 adet çok kısa, hızlı oyun sorusu ve 4 kısa şık üret."
+            )
+        }
+        val raw = executeStructuredWithFallback(rootSchema, promptContent)
+        val arr = JSONObject(raw).getJSONArray("questions")
+        return (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            val optsArr = o.getJSONArray("options")
+            val opts = (0 until optsArr.length()).map { optsArr.getString(it) }.take(4)
+            Game3dQuestion(
+                prompt = o.getString("prompt"),
+                options = if (opts.size == 4) opts else listOf("A", "B", "C", "D"),
+                correctIndex = o.optInt("correctIndex", 0).coerceIn(0, 3),
+                explanation = o.optString("explanation", "")
+            )
+        }
+    }
+
+    suspend fun generateWorksheetFromContext(
+        title: String,
+        subject: String,
+        gradeLevel: String,
+        contextText: String,
+        boardFormulas: List<String>
+    ): WorksheetData {
+        val qSchema = Schema.obj(
+            properties = mapOf(
+                "question" to Schema.string("Pratik çalışma sorusu"),
+                "options" to Schema.array(Schema.string(), "4 şık (A, B, C, D)"),
+                "answerKey" to Schema.string("Doğru şık ve kısa açıklaması (örn: B) 24)")
+            )
+        )
+        val rootSchema = Schema.obj(
+            properties = mapOf(
+                "summary" to Schema.string("Çalışma kağıdı üstü için 2-3 cümlelik net ders özeti"),
+                "formulas" to Schema.array(Schema.string(), "Tahtadaki / konudaki önemli formül ve kurallar"),
+                "questions" to Schema.array(qSchema, "Tam 5 adet pratik soru")
+            )
+        )
+        val promptContent = content {
+            text(
+                """
+                MrStudy 3.0 A4 Çalışma Kağıdı içeriği oluştur.
+                Başlık: $title | Ders: $subject | Sınıf: $gradeLevel
+                Mevcut Formüller: ${boardFormulas.joinToString("; ").ifBlank { "Yok" }}
+                Ders Bağlamı: ${contextText.take(1600)}
+                Tam 5 adet konuya özel pratik soru ve en alta eklenecek cevap anahtarı üret.
+                """.trimIndent()
+            )
+        }
+        val raw = executeStructuredWithFallback(rootSchema, promptContent)
+        val json = JSONObject(raw)
+        val formulas = json.optJSONArray("formulas")?.let { a -> (0 until a.length()).map { a.getString(it) } }
+            ?.ifEmpty { boardFormulas } ?: boardFormulas
+        val qArr = json.optJSONArray("questions")
+        val questions = if (qArr != null) {
+            (0 until qArr.length()).map { i ->
+                val o = qArr.getJSONObject(i)
+                val opts = o.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+                WorksheetPracticeQuestion(
+                    number = i + 1,
+                    question = o.optString("question", ""),
+                    options = opts,
+                    answerKey = o.optString("answerKey", "")
+                )
+            }
+        } else {
+            emptyList()
+        }
+        return WorksheetData(
+            title = title,
+            subject = subject,
+            gradeLevel = gradeLevel,
+            summary = json.optString("summary", contextText.take(350)),
+            formulas = formulas,
+            questions = questions
+        )
+    }
+
     data class PdfAiAnalysis(
         val summary: String,
         val topics: List<String>,
@@ -792,8 +1023,10 @@ class MrStudyAiService {
 
     private companion object {
         const val TAG = "MrStudyAiService"
-        const val PRIMARY_TEXT_MODEL = "gemini-3.8-flash"
-        const val FALLBACK_TEXT_MODEL = "gemini-3.5-flash-lite"
+        // 3-Layer Fallback Chain (3.8 and 4-argon intentionally disabled for quota protection)
+        const val MODEL_TIER_1 = "gemini-4-hydrogen"
+        const val MODEL_TIER_2 = "gemini-3.6-flash"
+        const val MODEL_TIER_3 = "gemini-3.5-flash-lite"
         const val APP_CHECK_TIMEOUT_MS = 10_000L
         const val FIRST_CHUNK_TIMEOUT_MS = 10_000L
         const val AI_TOTAL_TIMEOUT_MS = 60_000L

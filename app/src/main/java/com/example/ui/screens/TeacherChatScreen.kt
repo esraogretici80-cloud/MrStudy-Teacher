@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
@@ -92,6 +93,7 @@ import com.example.data.model.ChatSession
 import com.example.data.model.ExplanationDepth
 import com.example.data.model.SubjectCatalog
 import com.example.data.model.TeachingMode
+import com.example.ui.components.MrStudy3Backdrop
 import com.example.ui.state.MrStudyUiState
 import com.example.util.TurkishVoiceSpeaker
 import com.example.util.buildTurkishSpeechRecognizerIntent
@@ -112,6 +114,7 @@ fun TeacherChatScreen(
     onCancelStreaming: () -> Unit,
     onDismissError: () -> Unit,
     onOpenLiveLesson: () -> Unit,
+    onExportWorksheet: () -> Unit = {},
     onOpenAppCheckSetup: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -165,11 +168,12 @@ fun TeacherChatScreen(
         }
     }
 
+    MrStudy3Backdrop {
     Column(modifier = Modifier.fillMaxSize()) {
         // Top Controls Header
         Surface(
             tonalElevation = 2.dp,
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -242,6 +246,17 @@ fun TeacherChatScreen(
                                         }
                                     )
                                 }
+                            }
+                        }
+                        IconButton(
+                            onClick = onExportWorksheet,
+                            enabled = !state.isExportingWorksheet,
+                            modifier = Modifier.testTag("chat_export_worksheet_button")
+                        ) {
+                            if (state.isExportingWorksheet) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.PictureAsPdf, contentDescription = "PDF Çalışma Kağıdı İndir")
                             }
                         }
                         IconButton(
@@ -566,6 +581,7 @@ fun TeacherChatScreen(
                 }
             }
         }
+    }
     }
 
     if (showSessionDialog) {
