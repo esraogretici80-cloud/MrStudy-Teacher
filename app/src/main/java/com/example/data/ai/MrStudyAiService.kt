@@ -218,10 +218,10 @@ class MrStudyAiService {
 
     private suspend fun executeStructuredWithFallback(
         schema: Schema,
-        promptContent: Content
+        promptContent: Content,
+        tiers: List<String> = DEFAULT_TIERS
     ): String {
         ensureAppCheckReady()
-        val tiers = listOf(MODEL_TIER_1, MODEL_TIER_2, MODEL_TIER_3)
         return withTimeout(AI_TOTAL_TIMEOUT_MS) {
             var lastError: Exception? = null
             for ((index, modelId) in tiers.withIndex()) {
@@ -937,7 +937,11 @@ class MrStudyAiService {
                 "Minimum token ile $gradeLevel düzeyi '$subject - $topic' konusu için 5 adet çok kısa, hızlı oyun sorusu ve 4 kısa şık üret."
             )
         }
-        val raw = executeStructuredWithFallback(rootSchema, promptContent)
+        val raw = executeStructuredWithFallback(
+            schema = rootSchema,
+            promptContent = promptContent,
+            tiers = GAME_3D_TIERS
+        )
         val arr = JSONObject(raw).getJSONArray("questions")
         return (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
@@ -1021,14 +1025,16 @@ class MrStudyAiService {
         val definitions: List<String>
     )
 
-    private companion object {
-        const val TAG = "MrStudyAiService"
+    companion object {
+        private const val TAG = "MrStudyAiService"
         // 3-Layer Fallback Chain (3.8 and 4-argon intentionally disabled for quota protection)
         const val MODEL_TIER_1 = "gemini-4-hydrogen"
         const val MODEL_TIER_2 = "gemini-3.6-flash"
         const val MODEL_TIER_3 = "gemini-3.5-flash-lite"
-        const val APP_CHECK_TIMEOUT_MS = 10_000L
-        const val FIRST_CHUNK_TIMEOUT_MS = 10_000L
-        const val AI_TOTAL_TIMEOUT_MS = 60_000L
+        val DEFAULT_TIERS = listOf(MODEL_TIER_1, MODEL_TIER_2, MODEL_TIER_3)
+        val GAME_3D_TIERS = listOf(MODEL_TIER_2, MODEL_TIER_3)
+        private const val APP_CHECK_TIMEOUT_MS = 10_000L
+        private const val FIRST_CHUNK_TIMEOUT_MS = 10_000L
+        private const val AI_TOTAL_TIMEOUT_MS = 60_000L
     }
 }

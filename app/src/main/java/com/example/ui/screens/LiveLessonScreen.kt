@@ -84,6 +84,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -91,6 +93,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -133,7 +136,9 @@ import com.example.ui.theme.DeepNavyBar
 import com.example.ui.theme.ElectricBlueSecondary
 import com.example.ui.theme.NeonPurplePrimary
 import com.example.ui.theme.SuccessGreen
+import kotlinx.coroutines.delay
 import java.io.File
+import kotlin.math.roundToInt
 
 @Composable
 fun LiveLessonScreen(
@@ -162,6 +167,7 @@ fun LiveLessonScreen(
     onDismissMidQuestion: () -> Unit = {},
     onOpen3dGame: () -> Unit = {},
     onExportLiveWorksheet: () -> Unit = {},
+    onOpenPdfStudio: () -> Unit = {},
     onDismissError: () -> Unit,
     onOpenAppCheckSetup: () -> Unit = {}
 ) {
@@ -554,13 +560,7 @@ fun LiveLessonScreen(
                                     icon = Icons.Default.PictureAsPdf,
                                     accent = ElectricBlueSecondary,
                                     isLoading = appState.isExportingWorksheet,
-                                    onClick = {
-                                        if (appState.pdfSources.isNotEmpty()) {
-                                            showPdfMenu = true
-                                        } else {
-                                            onExportLiveWorksheet()
-                                        }
-                                    },
+                                    onClick = { showPdfMenu = true },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .testTag("live_bind_pdf_chip")
@@ -569,16 +569,33 @@ fun LiveLessonScreen(
                                     expanded = showPdfMenu,
                                     onDismissRequest = { showPdfMenu = false }
                                 ) {
-                                    appState.pdfSources.forEach { pdf ->
+                                    if (appState.pdfSources.isEmpty()) {
                                         DropdownMenuItem(
-                                            text = { Text("${pdf.title} (${pdf.pageCount} s.)") },
+                                            text = { Text("Kayıtlı PDF yok — PDF Stüdyo'da Ekle") },
                                             onClick = {
-                                                onSelectPdfForLive(pdf)
                                                 showPdfMenu = false
+                                                onOpenPdfStudio()
                                             }
                                         )
+                                    } else {
+                                        appState.pdfSources.forEach { pdf ->
+                                            DropdownMenuItem(
+                                                text = { Text("${pdf.title} (${pdf.pageCount} s.)") },
+                                                onClick = {
+                                                    onSelectPdfForLive(pdf)
+                                                    showPdfMenu = false
+                                                }
+                                            )
+                                        }
                                     }
                                     HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text("PDF Stüdyo'yu Aç (Yükle / Yönet)") },
+                                        onClick = {
+                                            showPdfMenu = false
+                                            onOpenPdfStudio()
+                                        }
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("PDF Çalışma Kağıdı İndir (A4)") },
                                         onClick = {
@@ -890,13 +907,27 @@ fun LiveLessonScreen(
                                         }
                                     }
 
-                                    TextButton(
-                                        onClick = { showPdfMenu = true },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Değiştir", style = MaterialTheme.typography.labelSmall)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        TextButton(
+                                            onClick = {
+                                                jumpInputText = ""
+                                                showJumpToPageDialog = true
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.testTag("live_pdf_jump_button")
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = CyberCyanTertiary)
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Sayfaya Git", style = MaterialTheme.typography.labelSmall, color = CyberCyanTertiary)
+                                        }
+                                        TextButton(
+                                            onClick = { showPdfMenu = true },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                        ) {
+                                            Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Değiştir", style = MaterialTheme.typography.labelSmall)
+                                        }
                                     }
                                 }
 
@@ -910,9 +941,9 @@ fun LiveLessonScreen(
                                 ) {
                                     IconButton(
                                         onClick = { onChangeLivePdfPage(-1) },
-                                        enabled = appState.activePdfPage > 1 && !appState.isPdfBusy,
+                                        enabled = appState.activePdfPage > 1,
                                         modifier = Modifier
-                                            .size(44.dp)
+                                            .size(48.dp)
                                             .testTag("live_pdf_prev_page")
                                     ) {
                                         Icon(
@@ -927,7 +958,7 @@ fun LiveLessonScreen(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable {
-                                                jumpInputText = appState.activePdfPage.toString()
+                                                jumpInputText = ""
                                                 showJumpToPageDialog = true
                                             }
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
@@ -954,7 +985,7 @@ fun LiveLessonScreen(
                                             }
                                         }
                                         Text(
-                                            text = "Klavyeyle gitmek için dokun",
+                                            text = "Sayfa seçmek için dokun veya kaydır",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = Color(0xFF94A3B8)
                                         )
@@ -962,9 +993,9 @@ fun LiveLessonScreen(
 
                                     IconButton(
                                         onClick = { onChangeLivePdfPage(1) },
-                                        enabled = appState.activePdfPage < currentPdf.pageCount && !appState.isPdfBusy,
+                                        enabled = appState.activePdfPage < currentPdf.pageCount,
                                         modifier = Modifier
-                                            .size(44.dp)
+                                            .size(48.dp)
                                             .testTag("live_pdf_next_page")
                                     ) {
                                         Icon(
@@ -972,6 +1003,82 @@ fun LiveLessonScreen(
                                             contentDescription = "Sonraki Sayfa (>)",
                                             tint = if (appState.activePdfPage < currentPdf.pageCount) CyberCyanTertiary else Color(0xFF475569)
                                         )
+                                    }
+                                }
+
+                                if (currentPdf.pageCount > 2) {
+                                    var sliderPos by remember(currentPdf.id, appState.activePdfPage) {
+                                        mutableFloatStateOf(appState.activePdfPage.toFloat())
+                                    }
+                                    var isDraggingSlider by remember(currentPdf.id) { mutableStateOf(false) }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "1",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF94A3B8)
+                                        )
+                                        Slider(
+                                            value = if (isDraggingSlider) sliderPos else appState.activePdfPage.toFloat(),
+                                            onValueChange = {
+                                                isDraggingSlider = true
+                                                sliderPos = it
+                                            },
+                                            onValueChangeFinished = {
+                                                val target = sliderPos.roundToInt().coerceIn(1, currentPdf.pageCount.toInt().coerceAtLeast(1))
+                                                isDraggingSlider = false
+                                                onJumpLivePdfPage(target)
+                                            },
+                                            valueRange = 1f..currentPdf.pageCount.toFloat().coerceAtLeast(2f),
+                                            colors = SliderDefaults.colors(
+                                                thumbColor = CyberCyanTertiary,
+                                                activeTrackColor = NeonPurplePrimary,
+                                                inactiveTrackColor = Color(0xFF1E293B)
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("live_pdf_page_slider")
+                                        )
+                                        Text(
+                                            text = if (isDraggingSlider) "s.${sliderPos.roundToInt()}" else "${currentPdf.pageCount}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isDraggingSlider) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isDraggingSlider) CyberCyanTertiary else Color(0xFF94A3B8)
+                                        )
+                                    }
+                                }
+
+                                val pdfErr = appState.pdfError
+                                if (!pdfErr.isNullOrBlank()) {
+                                    Surface(
+                                        color = DangerRed.copy(alpha = 0.14f),
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.45f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = pdfErr,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color(0xFFFCA5A5),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(
+                                                onClick = onOpenPdfStudio,
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("PDF Stüdyo", style = MaterialTheme.typography.labelSmall, color = CyberCyanTertiary)
+                                            }
+                                        }
                                     }
                                 }
 
@@ -1017,65 +1124,6 @@ fun LiveLessonScreen(
                                             }
                                         }
                                     }
-                                }
-
-                                if (showJumpToPageDialog) {
-                                    val focusRequester = remember { FocusRequester() }
-                                    val keyboardController = LocalSoftwareKeyboardController.current
-
-                                    LaunchedEffect(Unit) {
-                                        focusRequester.requestFocus()
-                                        keyboardController?.show()
-                                    }
-
-                                    AlertDialog(
-                                        onDismissRequest = {
-                                            keyboardController?.hide()
-                                            showJumpToPageDialog = false
-                                        },
-                                        title = { Text("Klavyeden Sayfa Seç") },
-                                        text = {
-                                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Text("Gitmek istediğiniz sayfa numarasını yazın (1 - ${currentPdf.pageCount}):")
-                                                OutlinedTextField(
-                                                    value = jumpInputText,
-                                                    onValueChange = { jumpInputText = it.filter(Char::isDigit) },
-                                                    singleLine = true,
-                                                    keyboardOptions = KeyboardOptions(
-                                                        keyboardType = KeyboardType.Number,
-                                                        imeAction = ImeAction.Go
-                                                    ),
-                                                    keyboardActions = KeyboardActions(
-                                                        onGo = {
-                                                            jumpInputText.toIntOrNull()?.let(onJumpLivePdfPage)
-                                                            keyboardController?.hide()
-                                                            showJumpToPageDialog = false
-                                                        }
-                                                    ),
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .focusRequester(focusRequester)
-                                                        .testTag("jump_page_input")
-                                                )
-                                            }
-                                        },
-                                        confirmButton = {
-                                            Button(
-                                                onClick = {
-                                                    jumpInputText.toIntOrNull()?.let(onJumpLivePdfPage)
-                                                    keyboardController?.hide()
-                                                    showJumpToPageDialog = false
-                                                },
-                                                modifier = Modifier.testTag("jump_page_confirm")
-                                            ) { Text("Git") }
-                                        },
-                                        dismissButton = {
-                                            TextButton(onClick = {
-                                                keyboardController?.hide()
-                                                showJumpToPageDialog = false
-                                            }) { Text("İptal") }
-                                        }
-                                    )
                                 }
                             }
                         }
@@ -1327,6 +1375,99 @@ fun LiveLessonScreen(
                     }
                 }
             }
+        }
+
+        val dialogPdf = appState.activePdf
+        if (showJumpToPageDialog && dialogPdf != null) {
+            val focusRequester = remember { FocusRequester() }
+            val keyboardController = LocalSoftwareKeyboardController.current
+            val maxPageInt = dialogPdf.pageCount.toInt().coerceAtLeast(1)
+
+            LaunchedEffect(showJumpToPageDialog) {
+                delay(100L)
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            }
+
+            AlertDialog(
+                onDismissRequest = {
+                    keyboardController?.hide()
+                    showJumpToPageDialog = false
+                },
+                title = { Text("Klavyeden Sayfa Seç") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "Gitmek istediğiniz sayfa numarasını yazın (1 - $maxPageInt • Şu an: ${appState.activePdfPage}):",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedTextField(
+                            value = jumpInputText,
+                            onValueChange = { jumpInputText = it.filter(Char::isDigit).take(5) },
+                            placeholder = { Text("Örn: 46") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Go
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onGo = {
+                                    jumpInputText.toIntOrNull()?.let { target ->
+                                        onJumpLivePdfPage(target.coerceIn(1, maxPageInt))
+                                        keyboardController?.hide()
+                                        showJumpToPageDialog = false
+                                    }
+                                }
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester)
+                                .testTag("jump_page_input")
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(
+                                "1" to 1,
+                                "-10" to (appState.activePdfPage - 10).coerceAtLeast(1),
+                                "+10" to (appState.activePdfPage + 10).coerceAtMost(maxPageInt),
+                                "$maxPageInt (Son)" to maxPageInt
+                            ).forEach { (label, target) ->
+                                AssistChip(
+                                    onClick = {
+                                        onJumpLivePdfPage(target)
+                                        keyboardController?.hide()
+                                        showJumpToPageDialog = false
+                                    },
+                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            jumpInputText.toIntOrNull()?.let { target ->
+                                onJumpLivePdfPage(target.coerceIn(1, maxPageInt))
+                            }
+                            keyboardController?.hide()
+                            showJumpToPageDialog = false
+                        },
+                        enabled = jumpInputText.toIntOrNull() != null,
+                        modifier = Modifier.testTag("jump_page_confirm")
+                    ) { Text("Git") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        keyboardController?.hide()
+                        showJumpToPageDialog = false
+                    }) { Text("İptal") }
+                }
+            )
         }
     }
 }

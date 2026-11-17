@@ -413,6 +413,7 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                         navigateToScreen(MrStudyRoutes.GAME_3D)
                                     },
                                     onExportLiveWorksheet = { viewModel.exportLiveWorksheetPdf(context) },
+                                    onOpenPdfStudio = { navigateToScreen(MrStudyRoutes.PDF) },
                                     onDismissError = viewModel::dismissLiveError,
                                     onOpenAppCheckSetup = { showAppCheckSetupDialog = true }
                                 )

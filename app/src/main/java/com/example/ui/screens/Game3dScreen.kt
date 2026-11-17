@@ -224,7 +224,7 @@ fun Game3dScreen(
                         ) {
                             CircularProgressIndicator(color = CyberCyanTertiary)
                             Text(
-                                text = "4 Hydrogen Konuya Özel 3B Sahne Hazırlıyor...",
+                                text = "Gemini 3.6 Flash Konuya Özel 3B Sahne Hazırlıyor...",
                                 style = MaterialTheme.typography.titleSmall,
                                 color = Color.White,
                                 textAlign = TextAlign.Center

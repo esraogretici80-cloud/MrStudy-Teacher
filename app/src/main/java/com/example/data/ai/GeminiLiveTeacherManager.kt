@@ -56,6 +56,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -336,7 +337,7 @@ class GeminiLiveTeacherManager {
         pdfTitle: String?,
         activePdfPage: Int?,
         initialPdfBitmap: Bitmap?,
-        onUserPageCommand: ((Int) -> Unit)? = null
+        onUserPageCommand: ((LivePdfCommand) -> Unit)? = null
     ) {
         val appContext = context.applicationContext
         stopSessionInternal(resetTranscripts = true)
@@ -479,9 +480,15 @@ class GeminiLiveTeacherManager {
         }
     }
 
-    fun sendVisualContextDuringLive(bitmap: Bitmap, label: String, promptText: String) {
+    fun sendVisualContextDuringLive(
+        bitmap: Bitmap,
+        label: String,
+        promptText: String,
+        transcriptSummary: String? = null
+    ) {
         val session = liveSession ?: return
-        appendTranscriptEntry(isStudent = true, text = "📎 $label: $promptText", tag = "Görsel")
+        val visibleText = transcriptSummary ?: "📎 $label: $promptText"
+        appendTranscriptEntry(isStudent = true, text = visibleText, tag = "Görsel")
         CoroutineScope(Dispatchers.IO).launch {
             runCatching {
                 val jpegBytes = compressBitmapToJpeg(bitmap)
@@ -1012,124 +1019,146 @@ class GeminiLiveTeacherManager {
         session: LiveSession,
         queue: Channel<ByteArray>,
         track: AudioTrack,
-        onUserPageCommand: ((Int) -> Unit)?
-    ) {
+        onUserPageCommand: ((LivePdfCommand) -> Unit)?
+    ) = coroutineScope {
         val userTurnBuffer = StringBuilder()
         val teacherTurnBuffer = StringBuilder()
+        var pendingPageCommandJob: Job? = null
+        var lastExecutedTurnCommand: LivePdfCommand? = null
 
-        session.receive().collect { message ->
-            when (message) {
-                is LiveServerContent -> {
-                    if (message.interrupted) {
-                        drainChannel(queue)
-                        runCatching {
-                            track.pause()
-                            track.flush()
-                            track.play()
-                        }
-                        isReceivingTeacherAudio.set(false)
-                        playbackDrainDeadlineMs.set(0L)
-                        if (teacherTurnBuffer.isNotBlank()) {
-                            appendTranscriptEntry(
-                                isStudent = false,
-                                text = teacherTurnBuffer.toString().trim(),
-                                tag = "Kesildi"
-                            )
-                            teacherTurnBuffer.clear()
-                        }
-                        _state.update {
-                            it.copy(
-                                teacherAudioLevel = 0f,
-                                liveTeacherTranscript = "",
-                                status = if (it.isMuted) LiveConnectionStatus.MUTED else LiveConnectionStatus.LISTENING
-                            )
-                        }
-                    }
-
-                    val inputText = message.inputTranscription?.text
-                    if (!inputText.isNullOrBlank()) {
-                        userTurnBuffer.append(inputText)
-                        val currentText = userTurnBuffer.toString()
-                        if (onUserPageCommand != null) {
-                            checkForPageCommand(currentText) { targetPage ->
-                                onUserPageCommand(targetPage)
-                            }
-                        }
-                        _state.update { it.copy(liveUserTranscript = currentText.trim()) }
-                    }
-
-                    val outputText = message.outputTranscription?.text
-                    if (!outputText.isNullOrBlank()) {
-                        teacherTurnBuffer.append(outputText)
-                        _state.update { it.copy(liveTeacherTranscript = teacherTurnBuffer.toString().trim()) }
-                    }
-
-                    val parts = message.content?.parts.orEmpty()
-                    for (part in parts) {
-                        when (part) {
-                            is InlineDataPart -> {
-                                if (part.mimeType.startsWith("audio/pcm", ignoreCase = true) &&
-                                    part.inlineData.isNotEmpty()
-                                ) {
-                                    val now = SystemClock.elapsedRealtime()
-                                    if (now >= forceBargeInWindowUntilMs.get()) {
-                                        isReceivingTeacherAudio.set(true)
-                                    }
-                                    queue.trySend(part.inlineData)
-                                }
-                            }
-                            is TextPart -> {
-                                if (outputText.isNullOrBlank() && part.text.isNotBlank()) {
-                                    teacherTurnBuffer.append(part.text)
-                                    _state.update { it.copy(liveTeacherTranscript = teacherTurnBuffer.toString().trim()) }
-                                }
-                            }
-                            else -> Unit
-                        }
-                    }
-
-                    if (message.turnComplete) {
-                        isReceivingTeacherAudio.set(false)
-                        val uText = userTurnBuffer.toString().trim()
-                        val tText = teacherTurnBuffer.toString().trim()
-                        if (uText.isNotBlank()) {
-                            appendTranscriptEntry(isStudent = true, text = uText)
-                        }
-                        if (tText.isNotBlank()) {
-                            appendTranscriptEntry(isStudent = false, text = tText)
-                        }
-                        userTurnBuffer.clear()
-                        teacherTurnBuffer.clear()
-                        val stillPlaying = isTeacherSpeakingNow()
-                        _state.update {
-                            it.copy(
-                                liveUserTranscript = "",
-                                liveTeacherTranscript = "",
-                                teacherAudioLevel = if (stillPlaying) it.teacherAudioLevel else 0f,
-                                status = when {
-                                    it.isMuted -> LiveConnectionStatus.MUTED
-                                    stillPlaying -> LiveConnectionStatus.TEACHER_SPEAKING
-                                    else -> LiveConnectionStatus.LISTENING
-                                }
-                            )
-                        }
-                    }
-                }
-
-                is LiveSessionResumptionUpdate -> {
-                    if (message.resumable == true && !message.newHandle.isNullOrBlank()) {
-                        resumptionHandle = message.newHandle
-                    }
-                }
-
-                is LiveServerGoAway -> {
-                    _state.update {
-                        it.copy(statusNotice = "Canlı oturum yenilenmek üzere, kısa süre içinde yeniden bağlanabilirsiniz.")
-                    }
-                }
-
-                else -> Unit
+        fun dispatchTurnPageCommand(rawUtterance: String) {
+            val callback = onUserPageCommand ?: return
+            val cmd = LivePdfCommandParser.parse(rawUtterance) ?: return
+            if (cmd != lastExecutedTurnCommand) {
+                lastExecutedTurnCommand = cmd
+                callback(cmd)
             }
+        }
+
+        try {
+            session.receive().collect { message ->
+                when (message) {
+                    is LiveServerContent -> {
+                        if (message.interrupted) {
+                            drainChannel(queue)
+                            runCatching {
+                                track.pause()
+                                track.flush()
+                                track.play()
+                            }
+                            isReceivingTeacherAudio.set(false)
+                            playbackDrainDeadlineMs.set(0L)
+                            if (teacherTurnBuffer.isNotBlank()) {
+                                appendTranscriptEntry(
+                                    isStudent = false,
+                                    text = teacherTurnBuffer.toString().trim(),
+                                    tag = "Kesildi"
+                                )
+                                teacherTurnBuffer.clear()
+                            }
+                            _state.update {
+                                it.copy(
+                                    teacherAudioLevel = 0f,
+                                    liveTeacherTranscript = "",
+                                    status = if (it.isMuted) LiveConnectionStatus.MUTED else LiveConnectionStatus.LISTENING
+                                )
+                            }
+                        }
+
+                        val inputText = message.inputTranscription?.text
+                        if (!inputText.isNullOrBlank()) {
+                            userTurnBuffer.append(inputText)
+                            val currentText = userTurnBuffer.toString()
+                            if (onUserPageCommand != null) {
+                                pendingPageCommandJob?.cancel()
+                                pendingPageCommandJob = launch {
+                                    delay(420L)
+                                    dispatchTurnPageCommand(currentText)
+                                }
+                            }
+                            _state.update { it.copy(liveUserTranscript = currentText.trim()) }
+                        }
+
+                        val outputText = message.outputTranscription?.text
+                        if (!outputText.isNullOrBlank()) {
+                            teacherTurnBuffer.append(outputText)
+                            _state.update { it.copy(liveTeacherTranscript = teacherTurnBuffer.toString().trim()) }
+                        }
+
+                        val parts = message.content?.parts.orEmpty()
+                        for (part in parts) {
+                            when (part) {
+                                is InlineDataPart -> {
+                                    if (part.mimeType.startsWith("audio/pcm", ignoreCase = true) &&
+                                        part.inlineData.isNotEmpty()
+                                    ) {
+                                        val now = SystemClock.elapsedRealtime()
+                                        if (now >= forceBargeInWindowUntilMs.get()) {
+                                            isReceivingTeacherAudio.set(true)
+                                        }
+                                        queue.trySend(part.inlineData)
+                                    }
+                                }
+                                is TextPart -> {
+                                    if (outputText.isNullOrBlank() && part.text.isNotBlank()) {
+                                        teacherTurnBuffer.append(part.text)
+                                        _state.update { it.copy(liveTeacherTranscript = teacherTurnBuffer.toString().trim()) }
+                                    }
+                                }
+                                else -> Unit
+                            }
+                        }
+
+                        if (message.turnComplete) {
+                            isReceivingTeacherAudio.set(false)
+                            pendingPageCommandJob?.cancel()
+                            pendingPageCommandJob = null
+                            val uText = userTurnBuffer.toString().trim()
+                            if (uText.isNotBlank()) {
+                                dispatchTurnPageCommand(uText)
+                                appendTranscriptEntry(isStudent = true, text = uText)
+                            }
+                            lastExecutedTurnCommand = null
+
+                            val tText = teacherTurnBuffer.toString().trim()
+                            if (tText.isNotBlank()) {
+                                appendTranscriptEntry(isStudent = false, text = tText)
+                            }
+                            userTurnBuffer.clear()
+                            teacherTurnBuffer.clear()
+                            val stillPlaying = isTeacherSpeakingNow()
+                            _state.update {
+                                it.copy(
+                                    liveUserTranscript = "",
+                                    liveTeacherTranscript = "",
+                                    teacherAudioLevel = if (stillPlaying) it.teacherAudioLevel else 0f,
+                                    status = when {
+                                        it.isMuted -> LiveConnectionStatus.MUTED
+                                        stillPlaying -> LiveConnectionStatus.TEACHER_SPEAKING
+                                        else -> LiveConnectionStatus.LISTENING
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    is LiveSessionResumptionUpdate -> {
+                        if (message.resumable == true && !message.newHandle.isNullOrBlank()) {
+                            resumptionHandle = message.newHandle
+                        }
+                    }
+
+                    is LiveServerGoAway -> {
+                        _state.update {
+                            it.copy(statusNotice = "Canlı oturum yenilenmek üzere, kısa süre içinde yeniden bağlanabilirsiniz.")
+                        }
+                    }
+
+                    else -> Unit
+                }
+            }
+        } finally {
+            pendingPageCommandJob?.cancel()
         }
     }
 
@@ -1322,19 +1351,6 @@ class GeminiLiveTeacherManager {
                 "Canlı ders istek kotasına ulaşıldı. Lütfen birkaç dakika sonra tekrar deneyin."
             }
             else -> error.localizedMessage ?: "Canlı ders oturumu başlatılamadı."
-        }
-    }
-
-    private fun checkForPageCommand(text: String, onPageFound: (Int) -> Unit) {
-        val cleaned = text.lowercase(java.util.Locale.ROOT)
-        val regex = Regex("(?:sayfa|sayfaya|git|aç|sayfasi|sayfası)\\D*(\\d+)|(\\d+)\\D*(?:\\.?\\s*sayfa|sayfaya)")
-        val match = regex.find(cleaned)
-        if (match != null) {
-            val numStr = match.groupValues[1].ifBlank { match.groupValues[2] }
-            val pageNum = numStr.toIntOrNull()
-            if (pageNum != null && pageNum in 1..10000) {
-                onPageFound(pageNum)
-            }
         }
     }
 

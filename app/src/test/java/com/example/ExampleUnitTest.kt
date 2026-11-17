@@ -2,12 +2,16 @@ package com.example
 
 import com.example.data.ai.LiveConnectionStatus
 import com.example.data.ai.LiveLessonUiState
+import com.example.data.ai.LivePdfCommand
+import com.example.data.ai.LivePdfCommandParser
+import com.example.data.ai.MrStudyAiService
 import com.example.data.local.LocalParentMetrics
 import com.example.data.model.Game3dQuestion
 import com.example.data.model.PdfResourceRecord
 import com.example.data.model.SmartBoardElementType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -134,5 +138,37 @@ class ExampleUnitTest {
         assertEquals(6, level)
         assertEquals(100L, levelProgress)
         assertTrue(progressFraction in 0.66f..0.67f)
+    }
+
+    @Test
+    fun aiService_game3dTiers_startsWithGemini36Flash() {
+        assertEquals(
+            listOf("gemini-3.6-flash", "gemini-3.5-flash-lite"),
+            MrStudyAiService.GAME_3D_TIERS
+        )
+        assertEquals(
+            listOf("gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.5-flash-lite"),
+            MrStudyAiService.DEFAULT_TIERS
+        )
+    }
+
+    @Test
+    fun livePdfCommandParser_parsesTurkishJumpAndStepCommands() {
+        assertEquals(LivePdfCommand.JumpToPage(46), LivePdfCommandParser.parse("sayfa 46"))
+        assertEquals(LivePdfCommand.JumpToPage(37), LivePdfCommandParser.parse("37'ye geçebilir misin?"))
+        assertEquals(LivePdfCommand.JumpToPage(12), LivePdfCommandParser.parse("12. sayfayı aç"))
+        assertEquals(LivePdfCommand.JumpToPage(8), LivePdfCommandParser.parse("s.8'e git"))
+        assertEquals(LivePdfCommand.JumpToPage(46), LivePdfCommandParser.parse("kırk altıncı sayfaya geç"))
+        assertEquals(LivePdfCommand.JumpToPage(37), LivePdfCommandParser.parse("otuz yediye geçebilir misin"))
+        assertEquals(LivePdfCommand.JumpToPage(46), LivePdfCommandParser.parse("sayfa 4 değil sayfa 46"))
+
+        assertEquals(LivePdfCommand.StepPage(1), LivePdfCommandParser.parse("sonraki sayfaya geç"))
+        assertEquals(LivePdfCommand.StepPage(1), LivePdfCommandParser.parse("sayfayı ilerlet"))
+        assertEquals(LivePdfCommand.StepPage(-1), LivePdfCommandParser.parse("önceki sayfaya dön"))
+        assertEquals(LivePdfCommand.StepPage(3), LivePdfCommandParser.parse("3 sayfa ilerlet"))
+        assertEquals(LivePdfCommand.StepPage(-2), LivePdfCommandParser.parse("2 sayfa geri git"))
+
+        assertNull(LivePdfCommandParser.parse("iki artı iki kaç eder?"))
+        assertNull(LivePdfCommandParser.parse("denklemi tekrar anlatır mısın?"))
     }
 }

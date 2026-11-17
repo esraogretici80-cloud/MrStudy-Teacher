@@ -11,6 +11,8 @@ import com.example.core.getLocalAppCheckDebugToken
 import com.example.core.isAppCheckErrorMessage
 import com.example.data.ai.GeminiLiveTeacherManager
 import com.example.data.ai.LiveLessonUiState
+import com.example.data.ai.LivePdfCommand
+import com.example.data.ai.LivePdfCommandParser
 import com.example.data.ai.MrStudyAiService
 import com.example.data.local.LocalStudyMetricsStore
 import com.example.data.model.ChatSession
@@ -62,6 +64,9 @@ class MrStudyViewModel(
     private var messagesJob: Job? = null
     private var examTimerJob: Job? = null
     private var teacherJob: Job? = null
+    private var livePdfRenderJob: Job? = null
+    private var livePdfPersistJob: Job? = null
+    private var livePdfSyncJob: Job? = null
 
     init {
         initializeUserData()
@@ -681,14 +686,37 @@ class MrStudyViewModel(
     }
 
     fun selectPdfAndLoadPage(pdf: PdfResourceRecord, pageNumber: Int = pdf.lastStudiedPage.toInt().coerceAtLeast(1)) {
+        val safePage = pageNumber.coerceIn(1, pdf.pageCount.toInt().coerceAtLeast(1))
+        _uiState.update {
+            it.copy(
+                isPdfBusy = true,
+                pdfError = null,
+                activePdfId = pdf.id,
+                activePdfPage = safePage
+            )
+        }
         viewModelScope.launch {
-            _uiState.update { it.copy(isPdfBusy = true, pdfError = null, activePdfId = pdf.id) }
             try {
-                val safePage = pageNumber.coerceIn(1, pdf.pageCount.toInt().coerceAtLeast(1))
-                val bitmap = PdfHelper.renderPdfPage(pdf.localUriString, safePage - 1)
-                _uiState.update { it.copy(activePdfPage = safePage, renderedPdfPage = bitmap) }
+                val bitmap = if (PdfHelper.isLocalPdfAvailable(pdf.localUriString)) {
+                    PdfHelper.renderPdfPage(pdf.localUriString, safePage - 1)
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            renderedPdfPage = null,
+                            pdfError = "PDF dosyası bu cihazda bulunamadı. Önizleme için PDF Stüdyo'dan dosyayı yeniden bağlayın."
+                        )
+                    }
+                    null
+                }
+                if (bitmap != null) {
+                    _uiState.update { it.copy(renderedPdfPage = bitmap, pdfError = null) }
+                }
                 if (safePage.toLong() != pdf.lastStudiedPage) {
-                    repository.updatePdfSource(currentUserId, pdf.copy(lastStudiedPage = safePage.toLong()))
+                    runCatching {
+                        withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                            repository.updatePdfSource(currentUserId, pdf.copy(lastStudiedPage = safePage.toLong()))
+                        }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -1285,8 +1313,13 @@ class MrStudyViewModel(
             pdfTitle = activePdf?.title,
             activePdfPage = if (activePdf != null) state.activePdfPage else null,
             initialPdfBitmap = if (activePdf != null) state.renderedPdfPage else null,
-            onUserPageCommand = { targetPage ->
-                jumpLiveToPdfPage(targetPage)
+            onUserPageCommand = { command ->
+                viewModelScope.launch {
+                    when (command) {
+                        is LivePdfCommand.JumpToPage -> jumpLiveToPdfPage(command.page)
+                        is LivePdfCommand.StepPage -> changeLivePdfPage(command.delta)
+                    }
+                }
             }
         )
     }
@@ -1328,6 +1361,11 @@ class MrStudyViewModel(
     }
 
     fun sendLiveText(text: String) {
+        when (val cmd = LivePdfCommandParser.parse(text)) {
+            is LivePdfCommand.JumpToPage -> jumpLiveToPdfPage(cmd.page)
+            is LivePdfCommand.StepPage -> changeLivePdfPage(cmd.delta)
+            null -> Unit
+        }
         liveManager.sendTextDuringLive(text)
     }
 
@@ -1355,12 +1393,21 @@ class MrStudyViewModel(
         viewModelScope.launch {
             try {
                 val bmp = state.renderedPdfPage
-                    ?: PdfHelper.renderPdfPage(activePdf.localUriString, (page - 1).coerceAtLeast(0), maxWidthPx = 960)
-                liveManager.sendVisualContextDuringLive(
-                    bitmap = bmp,
-                    label = "${activePdf.title} s.$page",
-                    promptText = "Öğrencinin PDF kaynağının $page. sayfasını görüyorsun. Bu sayfadaki ana konuyu ve varsa örnekleri canlı olarak anlat."
-                )
+                    ?: if (PdfHelper.isLocalPdfAvailable(activePdf.localUriString)) {
+                        PdfHelper.renderPdfPage(activePdf.localUriString, (page - 1).coerceAtLeast(0), maxWidthPx = 960)
+                    } else null
+                if (bmp != null) {
+                    liveManager.sendVisualContextDuringLive(
+                        bitmap = bmp,
+                        label = "${activePdf.title} s.$page",
+                        promptText = "Öğrencinin PDF kaynağının $page. sayfasını görüyorsun. Bu sayfadaki ana konuyu ve varsa örnekleri canlı olarak anlat.",
+                        transcriptSummary = "📄 ${activePdf.title} • Sayfa $page gösterildi"
+                    )
+                } else {
+                    liveManager.sendTextDuringLive(
+                        "Öğrenci '${activePdf.title}' PDF dosyasında $page. sayfada. Bu sayfa cihazda önbellekte değil ancak $page. sayfadan devam etmek istiyor."
+                    )
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1373,42 +1420,12 @@ class MrStudyViewModel(
         val state = _uiState.value
         val activePdf = state.activePdf ?: return
         val maxPages = activePdf.pageCount.toInt().coerceAtLeast(1)
-        val currentPage = state.activePdfPage
-        val newPage = (currentPage + delta).coerceIn(1, maxPages)
-        if (newPage == currentPage) return
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isPdfBusy = true) }
-            try {
-                val bitmap = PdfHelper.renderPdfPage(activePdf.localUriString, newPage - 1, maxWidthPx = 960)
-                _uiState.update {
-                    it.copy(
-                        activePdfPage = newPage,
-                        renderedPdfPage = bitmap,
-                        statusBanner = "${activePdf.title}: $newPage. sayfaya geçildi"
-                    )
-                }
-                repository.updatePdfSource(currentUserId, activePdf.copy(lastStudiedPage = newPage.toLong()))
-
-                if (liveManager.state.value.isSessionActive) {
-                    if (bitmap != null) {
-                        liveManager.sendVisualContextDuringLive(
-                            bitmap = bitmap,
-                            label = "${activePdf.title} s.$newPage",
-                            promptText = "Öğrenci PDF kaynağında $newPage. sayfaya geçti (önceki sayfa: $currentPage). Bu yeni sayfadaki konuyu/soruları kısaca inceleyip öğrenciye rehberlik et."
-                        )
-                    } else {
-                        liveManager.sendTextDuringLive("Öğrenci ${activePdf.title} dökümanında $newPage. sayfaya geçti.")
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _uiState.update { it.copy(pdfError = "Sayfa değiştirilemedi: ${e.localizedMessage}") }
-            } finally {
-                _uiState.update { it.copy(isPdfBusy = false) }
-            }
-        }
+        val newPage = (state.activePdfPage + delta).coerceIn(1, maxPages)
+        navigateLivePdfToPage(
+            targetPage = newPage,
+            reasonText = "${activePdf.title}: $newPage. sayfaya geçildi",
+            syncDelayMs = 280L
+        )
     }
 
     fun jumpLiveToPdfPage(targetPage: Int) {
@@ -1416,38 +1433,98 @@ class MrStudyViewModel(
         val activePdf = state.activePdf ?: return
         val maxPages = activePdf.pageCount.toInt().coerceAtLeast(1)
         val safePage = targetPage.coerceIn(1, maxPages)
-        if (safePage == state.activePdfPage) return
+        navigateLivePdfToPage(
+            targetPage = safePage,
+            reasonText = "${activePdf.title}: $safePage. sayfaya geçildi",
+            syncDelayMs = 150L
+        )
+    }
 
-        viewModelScope.launch {
-            _uiState.update { it.copy(isPdfBusy = true) }
+    private fun navigateLivePdfToPage(
+        targetPage: Int,
+        reasonText: String,
+        syncDelayMs: Long
+    ) {
+        val state = _uiState.value
+        val activePdf = state.activePdf ?: return
+        val maxPages = activePdf.pageCount.toInt().coerceAtLeast(1)
+        val safePage = targetPage.coerceIn(1, maxPages)
+        val previousPage = state.activePdfPage
+        if (safePage == previousPage && state.renderedPdfPage != null && state.pdfError == null) return
+
+        // Update page state immediately so UI, rapid button taps, and voice jumps always reflect the new page
+        _uiState.update {
+            it.copy(
+                activePdfPage = safePage,
+                isPdfBusy = true,
+                pdfError = null,
+                statusBanner = reasonText
+            )
+        }
+
+        livePdfRenderJob?.cancel()
+        livePdfRenderJob = viewModelScope.launch {
             try {
-                val bitmap = PdfHelper.renderPdfPage(activePdf.localUriString, safePage - 1, maxWidthPx = 960)
-                _uiState.update {
-                    it.copy(
-                        activePdfPage = safePage,
-                        renderedPdfPage = bitmap,
-                        statusBanner = "${activePdf.title}: $safePage. sayfaya sesli komutla geçildi"
-                    )
+                val bitmap = if (PdfHelper.isLocalPdfAvailable(activePdf.localUriString)) {
+                    runCatching {
+                        PdfHelper.renderPdfPage(activePdf.localUriString, safePage - 1, maxWidthPx = 960)
+                    }.onFailure { err ->
+                        _uiState.update {
+                            it.copy(
+                                renderedPdfPage = null,
+                                pdfError = "Sayfa $safePage önizlemesi açılamadı: ${err.localizedMessage ?: "Bilinmeyen hata"}"
+                            )
+                        }
+                    }.getOrNull()
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            renderedPdfPage = null,
+                            pdfError = "PDF dosyası bu cihazda bulunamadı. Sayfa numarası güncellendi; görsel önizleme için PDF Stüdyo'dan dosyayı yeniden bağlayın."
+                        )
+                    }
+                    null
                 }
-                repository.updatePdfSource(currentUserId, activePdf.copy(lastStudiedPage = safePage.toLong()))
+
+                if (bitmap != null) {
+                    _uiState.update { it.copy(renderedPdfPage = bitmap, pdfError = null) }
+                }
 
                 if (liveManager.state.value.isSessionActive) {
-                    if (bitmap != null) {
-                        liveManager.sendVisualContextDuringLive(
-                            bitmap = bitmap,
-                            label = "${activePdf.title} s.$safePage",
-                            promptText = "Öğrenci sesli komutla $safePage. sayfaya geçti. Bu yeni sayfadaki konuyu ve soruları inceleyip anlat."
-                        )
-                    } else {
-                        liveManager.sendTextDuringLive("Öğrenci ${activePdf.title} dökümanında $safePage. sayfaya geçti.")
+                    livePdfSyncJob?.cancel()
+                    livePdfSyncJob = launch {
+                        delay(syncDelayMs)
+                        val pageBitmap = _uiState.value.renderedPdfPage ?: bitmap
+                        if (pageBitmap != null) {
+                            liveManager.sendVisualContextDuringLive(
+                                bitmap = pageBitmap,
+                                label = "${activePdf.title} s.$safePage",
+                                promptText = "Öğrenci '${activePdf.title}' PDF kaynağında $safePage. sayfaya geçti (önceki sayfa: $previousPage). Bu $safePage. sayfadaki konuyu/soruları inceleyip rehberlik et.",
+                                transcriptSummary = "📄 ${activePdf.title} • Sayfa $safePage/$maxPages açıldı"
+                            )
+                        } else {
+                            liveManager.sendTextDuringLive(
+                                "Öğrenci '${activePdf.title}' dökümanında $safePage/$maxPages. sayfaya geçti."
+                            )
+                        }
                     }
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _uiState.update { it.copy(pdfError = "Sayfaya geçilemedi: ${e.localizedMessage}") }
             } finally {
                 _uiState.update { it.copy(isPdfBusy = false) }
+            }
+        }
+
+        // Persist lastStudiedPage asynchronously with timeout so network delays never lock PDF navigation
+        livePdfPersistJob?.cancel()
+        livePdfPersistJob = viewModelScope.launch {
+            delay(350L)
+            runCatching {
+                withTimeout(FIRESTORE_WRITE_TIMEOUT_MS) {
+                    repository.updatePdfSource(
+                        currentUserId,
+                        activePdf.copy(lastStudiedPage = safePage.toLong())
+                    )
+                }
             }
         }
     }
