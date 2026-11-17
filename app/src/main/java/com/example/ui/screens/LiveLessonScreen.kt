@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -100,6 +101,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -654,16 +658,102 @@ fun LiveLessonScreen(
                                 }
 
                                 AnimatedVisibility(visible = isPdfPreviewExpanded) {
-                                    Image(
-                                        bitmap = appState.renderedPdfPage.asImageBitmap(),
-                                        contentDescription = "PDF Sayfa Önizleme",
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = 180.dp)
-                                            .clip(RoundedCornerShape(8.dp)),
-                                        contentScale = ContentScale.Fit
-                                    )
+                                    Crossfade(
+                                        targetState = appState.renderedPdfPage,
+                                        animationSpec = tween(350),
+                                        label = "PdfPageCrossfade"
+                                    ) { bmp ->
+                                        if (bmp != null) {
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = "PDF Sayfa Önizleme",
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(max = 200.dp)
+                                                    .clip(RoundedCornerShape(8.dp)),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(100.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+
+                            if (showJumpToPageDialog) {
+                                val focusRequester = remember { FocusRequester() }
+                                val keyboardController = LocalSoftwareKeyboardController.current
+
+                                LaunchedEffect(Unit) {
+                                    focusRequester.requestFocus()
+                                    keyboardController?.show()
+                                }
+
+                                androidx.compose.material3.AlertDialog(
+                                    onDismissRequest = {
+                                        keyboardController?.hide()
+                                        showJumpToPageDialog = false
+                                    },
+                                    title = { Text("Klavyeden Sayfa Seç") },
+                                    text = {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text("Gitmek istediğiniz sayfa numarasını yazın (1 - ${currentPdf.pageCount}):")
+                                            OutlinedTextField(
+                                                value = jumpInputText,
+                                                onValueChange = { jumpInputText = it.filter { ch -> ch.isDigit() } },
+                                                singleLine = true,
+                                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                                                    imeAction = androidx.compose.ui.text.input.ImeAction.Go
+                                                ),
+                                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                                    onGo = {
+                                                        val pageNum = jumpInputText.toIntOrNull()
+                                                        if (pageNum != null) {
+                                                            onJumpLivePdfPage(pageNum)
+                                                        }
+                                                        keyboardController?.hide()
+                                                        showJumpToPageDialog = false
+                                                    }
+                                                ),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .focusRequester(focusRequester)
+                                                    .testTag("jump_page_input")
+                                            )
+                                        }
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                val pageNum = jumpInputText.toIntOrNull()
+                                                if (pageNum != null) {
+                                                    onJumpLivePdfPage(pageNum)
+                                                }
+                                                keyboardController?.hide()
+                                                showJumpToPageDialog = false
+                                            },
+                                            modifier = Modifier.testTag("jump_page_confirm")
+                                        ) {
+                                            Text("Git")
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = {
+                                            keyboardController?.hide()
+                                            showJumpToPageDialog = false
+                                        }) {
+                                            Text("İptal")
+                                        }
+                                    }
+                                )
                             }
                         }
                     }

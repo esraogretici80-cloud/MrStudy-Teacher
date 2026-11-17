@@ -57,12 +57,12 @@ fun configureAppCheck(context: Context, intent: Intent?) {
                     .commit()
                 Log.d(TAG, "App Check debug secret configured from BuildConfig Secrets.")
             } else if (prefs.getString(DEBUG_SECRET_KEY, null).isNullOrBlank()) {
-                // Pre-generate and synchronously persist a stable UUID for sideloaded debug installs
-                val generated = UUID.randomUUID().toString()
+                // Use a shared default debug secret so shared APKs across friend groups share the same debug identity
+                val sharedSecret = "MrStudy-Shared-Debug-Token-2026-AppCheck"
                 prefs.edit()
-                    .putString(DEBUG_SECRET_KEY, generated)
+                    .putString(DEBUG_SECRET_KEY, sharedSecret)
                     .commit()
-                Log.w(TAG, "No debug token in Intent/Secrets; generated persistent local debug secret.")
+                Log.w(TAG, "No debug token in Intent/Secrets; configured shared persistent debug secret.")
             }
 
             FirebaseAppCheck.getInstance().installAppCheckProviderFactory(

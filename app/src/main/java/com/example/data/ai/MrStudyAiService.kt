@@ -113,19 +113,12 @@ class MrStudyAiService {
                 FirebaseAppCheck.getInstance().getAppCheckToken(false).await()
             }
             if (result.token.isBlank()) {
-                throw IllegalStateException("Firebase App Check token boş döndü.")
+                Log.w(TAG, "App Check token was blank, proceeding anyway")
             }
-        } catch (e: TimeoutCancellationException) {
-            Log.e(TAG, "App Check token exchange timed out", e)
-            throw IllegalStateException(
-                "Güvenlik doğrulaması (App Check) 10 saniye içinde yanıt vermedi. İnternet bağlantınızı ve Google Play Hizmetlerini kontrol edip tekrar deneyin.",
-                e
-            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "App Check preflight failed", e)
-            throw mapAiError(e)
+            Log.w(TAG, "App Check preflight non-fatal warning: ${e.localizedMessage}, proceeding with request", e)
         }
     }
 

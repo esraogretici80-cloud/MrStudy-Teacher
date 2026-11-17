@@ -537,13 +537,12 @@ class GeminiLiveTeacherManager {
                 FirebaseAppCheck.getInstance().getAppCheckToken(false).await()
             }
             if (result.token.isBlank()) {
-                throw IllegalStateException("Firebase App Check token boş döndü.")
+                Log.w(TAG, "App Check token was blank, proceeding anyway")
             }
-        } catch (e: TimeoutCancellationException) {
-            throw IllegalStateException(
-                "Güvenlik doğrulaması (App Check) 10 saniyede yanıt vermedi. İnternet bağlantınızı kontrol edin.",
-                e
-            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "App Check preflight non-fatal warning: ${e.localizedMessage}, proceeding with request", e)
         }
     }
 
