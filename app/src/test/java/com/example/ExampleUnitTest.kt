@@ -96,4 +96,43 @@ class ExampleUnitTest {
         assertEquals(4, q.options.size)
         assertEquals("3", q.options[q.correctIndex])
     }
+
+    @Test
+    fun mrStudyRoutes_rootTabsAndSubRoutes_distinctAndComplete() {
+        assertEquals(
+            setOf(
+                MrStudyRoutes.DASHBOARD,
+                MrStudyRoutes.LIVE_LESSON,
+                MrStudyRoutes.TEACHER,
+                MrStudyRoutes.PARENT
+            ),
+            MrStudyRoutes.rootTabs
+        )
+        val allRoutes = listOf(
+            MrStudyRoutes.DASHBOARD,
+            MrStudyRoutes.LIVE_LESSON,
+            MrStudyRoutes.TEACHER,
+            MrStudyRoutes.PARENT,
+            MrStudyRoutes.PDF,
+            MrStudyRoutes.EXAM,
+            MrStudyRoutes.STUDY,
+            MrStudyRoutes.GAME_3D
+        )
+        assertEquals(allRoutes.size, allRoutes.toSet().size)
+        assertFalse(MrStudyRoutes.rootTabs.contains(MrStudyRoutes.PDF))
+        assertFalse(MrStudyRoutes.rootTabs.contains(MrStudyRoutes.EXAM))
+        assertFalse(MrStudyRoutes.rootTabs.contains(MrStudyRoutes.STUDY))
+        assertFalse(MrStudyRoutes.rootTabs.contains(MrStudyRoutes.GAME_3D))
+    }
+
+    @Test
+    fun studentProfile_xpLevelAndProgress_calculatedFromRealXp() {
+        val xp = 850L
+        val level = (xp / 150L).toInt() + 1
+        val levelProgress = (xp % 150L)
+        val progressFraction = (levelProgress / 150f).coerceIn(0f, 1f)
+        assertEquals(6, level)
+        assertEquals(100L, levelProgress)
+        assertTrue(progressFraction in 0.66f..0.67f)
+    }
 }

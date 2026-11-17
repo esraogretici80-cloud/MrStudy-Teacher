@@ -15,35 +15,46 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -55,6 +66,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,12 +78,32 @@ import com.example.data.model.SmartBoardElement
 import com.example.data.model.SmartBoardElementType
 import com.example.data.model.SmartBoardPayload
 import com.example.ui.theme.CyberCyanTertiary
+import com.example.ui.theme.DeepNavyBar
 import com.example.ui.theme.ElectricBlueSecondary
+import com.example.ui.theme.GoldStreakAccent
 import com.example.ui.theme.NeonPurplePrimary
 import com.example.ui.theme.SpaceBlackBackground
 import com.example.ui.theme.SpaceGlassSurface
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.sin
+
+fun Modifier.pressableScale(
+    interactionSource: MutableInteractionSource? = null,
+    pressedScale: Float = 0.965f
+): Modifier = composed {
+    val source = interactionSource ?: remember { MutableInteractionSource() }
+    val isPressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) pressedScale else 1f,
+        animationSpec = spring(stiffness = 520f, dampingRatio = 0.72f),
+        label = "pressable_scale"
+    )
+    this.graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
 
 @Composable
 fun MrStudy3Backdrop(
@@ -86,9 +119,10 @@ fun MrStudy3Backdrop(
                 if (isSpaceTheme) {
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF0B0F19),
-                            Color(0xFF10172A),
-                            Color(0xFF090D16)
+                            Color(0xFF070B14),
+                            Color(0xFF0B1120),
+                            Color(0xFF10182E),
+                            Color(0xFF080D18)
                         )
                     )
                 } else {
@@ -98,32 +132,49 @@ fun MrStudy3Backdrop(
     ) {
         if (isSpaceTheme) {
             Canvas(modifier = Modifier.fillMaxSize()) {
+                // Top-left violet cosmic glow
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(NeonPurplePrimary.copy(alpha = 0.22f), Color.Transparent),
-                        center = Offset(size.width * 0.12f, size.height * 0.08f),
-                        radius = size.maxDimension * 0.55f
+                        colors = listOf(NeonPurplePrimary.copy(alpha = 0.25f), Color.Transparent),
+                        center = Offset(size.width * 0.10f, size.height * 0.06f),
+                        radius = size.maxDimension * 0.56f
                     ),
-                    radius = size.maxDimension * 0.55f,
-                    center = Offset(size.width * 0.12f, size.height * 0.08f)
+                    radius = size.maxDimension * 0.56f,
+                    center = Offset(size.width * 0.10f, size.height * 0.06f)
                 )
+                // Mid-right electric blue aura
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(ElectricBlueSecondary.copy(alpha = 0.18f), Color.Transparent),
-                        center = Offset(size.width * 0.92f, size.height * 0.28f),
-                        radius = size.maxDimension * 0.50f
+                        colors = listOf(ElectricBlueSecondary.copy(alpha = 0.20f), Color.Transparent),
+                        center = Offset(size.width * 0.94f, size.height * 0.30f),
+                        radius = size.maxDimension * 0.52f
                     ),
-                    radius = size.maxDimension * 0.50f,
-                    center = Offset(size.width * 0.92f, size.height * 0.28f)
+                    radius = size.maxDimension * 0.52f,
+                    center = Offset(size.width * 0.94f, size.height * 0.30f)
                 )
+                // Bottom cyan glow
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(CyberCyanTertiary.copy(alpha = 0.10f), Color.Transparent),
-                        center = Offset(size.width * 0.5f, size.height * 0.92f),
-                        radius = size.maxDimension * 0.45f
+                        colors = listOf(CyberCyanTertiary.copy(alpha = 0.12f), Color.Transparent),
+                        center = Offset(size.width * 0.45f, size.height * 0.93f),
+                        radius = size.maxDimension * 0.48f
                     ),
-                    radius = size.maxDimension * 0.45f,
-                    center = Offset(size.width * 0.5f, size.height * 0.92f)
+                    radius = size.maxDimension * 0.48f,
+                    center = Offset(size.width * 0.45f, size.height * 0.93f)
+                )
+                // Subtle diagonal energy beams
+                drawLine(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            ElectricBlueSecondary.copy(alpha = 0.08f),
+                            NeonPurplePrimary.copy(alpha = 0.10f),
+                            Color.Transparent
+                        )
+                    ),
+                    start = Offset(0f, size.height * 0.16f),
+                    end = Offset(size.width, size.height * 0.04f),
+                    strokeWidth = 2.dp.toPx()
                 )
             }
         }
@@ -136,26 +187,324 @@ fun GlassCard(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 22.dp,
     accentBorder: Color = NeonPurplePrimary,
-    containerColor: Color = SpaceGlassSurface.copy(alpha = 0.78f),
+    secondaryBorder: Color = ElectricBlueSecondary,
+    containerColor: Color = SpaceGlassSurface.copy(alpha = 0.80f),
+    onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val isDark = MaterialTheme.colorScheme.background.red < 0.2f
+    val interactionSource = remember { MutableInteractionSource() }
+    val baseModifier = if (onClick != null) {
+        modifier
+            .pressableScale(interactionSource)
+            .clip(RoundedCornerShape(cornerRadius))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(),
+                onClick = onClick
+            )
+    } else {
+        modifier
+    }
+
     Surface(
-        modifier = modifier,
+        modifier = baseModifier,
         shape = RoundedCornerShape(cornerRadius),
         color = if (isDark) containerColor else MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         border = BorderStroke(
-            width = 1.dp,
+            width = 1.15.dp,
             brush = Brush.linearGradient(
                 colors = listOf(
-                    accentBorder.copy(alpha = if (isDark) 0.52f else 0.28f),
-                    ElectricBlueSecondary.copy(alpha = if (isDark) 0.24f else 0.12f)
+                    accentBorder.copy(alpha = if (isDark) 0.72f else 0.34f),
+                    secondaryBorder.copy(alpha = if (isDark) 0.42f else 0.18f),
+                    accentBorder.copy(alpha = if (isDark) 0.28f else 0.10f)
                 )
             )
         ),
-        tonalElevation = if (isDark) 0.dp else 2.dp
+        tonalElevation = if (isDark) 0.dp else 2.dp,
+        shadowElevation = if (isDark) 6.dp else 2.dp
     ) {
-        Column(content = content)
+        Box(
+            modifier = Modifier.background(
+                if (isDark) {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.055f),
+                            Color.Transparent,
+                            accentBorder.copy(alpha = 0.04f)
+                        )
+                    )
+                } else {
+                    Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+                }
+            )
+        ) {
+            Column(content = content)
+        }
+    }
+}
+
+@Composable
+fun MrStudyLogoHeader(
+    gradeLevel: String,
+    onToggleGradeMode: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            // Glowing 3D Cap Emblem
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF171E3A),
+                border = BorderStroke(
+                    1.2.dp,
+                    Brush.linearGradient(listOf(NeonPurplePrimary, CyberCyanTertiary))
+                ),
+                shadowElevation = 8.dp,
+                modifier = Modifier.size(42.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                NeonPurplePrimary.copy(alpha = 0.45f),
+                                ElectricBlueSecondary.copy(alpha = 0.18f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.School,
+                        contentDescription = "MrStudy 3.0",
+                        tint = CyberCyanTertiary,
+                        modifier = Modifier.size(23.dp)
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "MrStudy",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1
+                    )
+                    Surface(
+                        color = ElectricBlueSecondary.copy(alpha = 0.22f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, CyberCyanTertiary.copy(alpha = 0.65f))
+                    ) {
+                        Text(
+                            text = "3.0",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = CyberCyanTertiary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "Geleceğin Yapay Zekâ Akademisi",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        GradeModeBadge(
+            currentGrade = gradeLevel,
+            onToggleGradeMode = onToggleGradeMode
+        )
+    }
+}
+
+@Composable
+fun SubScreenTopBar(
+    title: String,
+    subtitle: String,
+    onBack: () -> Unit,
+    accentColor: Color = CyberCyanTertiary,
+    badgeText: String? = null,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = DeepNavyBar.copy(alpha = 0.94f),
+        border = BorderStroke(0.9.dp, NeonPurplePrimary.copy(alpha = 0.35f)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFF172038),
+                border = BorderStroke(1.dp, ElectricBlueSecondary.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .size(44.dp)
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
+                    .clickable(onClick = onBack)
+                    .testTag("subscreen_back_button")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Geri Dön",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (!badgeText.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = accentColor.copy(alpha = 0.16f),
+                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f))
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = accentColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NeonGradientButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    enabled: Boolean = true,
+    gradientColors: List<Color> = listOf(NeonPurplePrimary, ElectricBlueSecondary),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 12.dp)
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val alpha = if (enabled) 1f else 0.5f
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f * alpha)),
+        shadowElevation = if (enabled) 8.dp else 0.dp,
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .pressableScale(interactionSource)
+            .clip(RoundedCornerShape(28.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = gradientColors.map { it.copy(alpha = alpha) }
+                )
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(color = Color.White),
+                onClick = onClick
+            )
+    ) {
+        Row(
+            modifier = Modifier.padding(contentPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(7.dp))
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+fun LiveSpectrumWaveBackground(
+    modifier: Modifier = Modifier,
+    accentPrimary: Color = NeonPurplePrimary,
+    accentSecondary: Color = CyberCyanTertiary
+) {
+    val infinite = rememberInfiniteTransition(label = "spectrum")
+    val phase by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(2600), RepeatMode.Restart),
+        label = "spectrum_phase"
+    )
+    Canvas(modifier = modifier) {
+        val barCount = 34
+        val gap = size.width / barCount
+        for (i in 0 until barCount) {
+            val wave = 0.35f + 0.65f * abs(sin(phase + i * 0.45f))
+            val barH = size.height * wave
+            val x = i * gap + gap * 0.25f
+            val color = if (i % 3 == 0) accentSecondary else accentPrimary
+            drawLine(
+                color = color.copy(alpha = 0.32f),
+                start = Offset(x, size.height),
+                end = Offset(x, size.height - barH),
+                strokeWidth = (gap * 0.45f).coerceAtLeast(2.dp.toPx()),
+                cap = StrokeCap.Round
+            )
+        }
     }
 }
 
@@ -172,7 +521,7 @@ fun GradeModeBadge(
 
     val nextTarget = if (isYks) "6. Sınıf" else "YKS Hazırlık"
     val badgeBg by animateColorAsState(
-        targetValue = if (isYks) ElectricBlueSecondary.copy(alpha = 0.22f) else NeonPurplePrimary.copy(alpha = 0.24f),
+        targetValue = if (isYks) ElectricBlueSecondary.copy(alpha = 0.24f) else NeonPurplePrimary.copy(alpha = 0.26f),
         label = "grade_badge_bg"
     )
     val badgeBorder by animateColorAsState(
@@ -180,17 +529,24 @@ fun GradeModeBadge(
         label = "grade_badge_border"
     )
 
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         color = badgeBg,
-        border = BorderStroke(1.dp, badgeBorder.copy(alpha = 0.7f)),
+        border = BorderStroke(
+            1.1.dp,
+            Brush.horizontalGradient(listOf(badgeBorder, CyberCyanTertiary.copy(alpha = 0.75f)))
+        ),
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onToggleGradeMode(nextTarget) }
+            .pressableScale(interactionSource)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(interactionSource = interactionSource, indication = androidx.compose.material3.ripple()) {
+                onToggleGradeMode(nextTarget)
+            }
             .testTag("grade_mode_switcher_badge")
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
@@ -221,11 +577,11 @@ fun GradeModeBadge(
 }
 
 /**
- * Interactive 2D/Canvas MrStudy Robot Mascot:
- * - Mezuniyet kepli (graduation cap + golden/cyan tassel)
- * - Mor ışıklı kulaklık (neon purple glowing headphones)
- * - Beyaz-siyah fütüristik gövde (white outer armor + obsidian chassis)
- * - Dijital ekran yüzünde mor parlayan ifadeli gözler + ses dalgasına senkron dijital ağız
+ * 3D-shaded Volumetric MrStudy Robot Mascot:
+ * - Spherical gradient armor (white glossy shell + obsidian cybernetic chassis)
+ * - Floating graduation cap with golden tassel
+ * - Glowing electric purple & cyber cyan headphones
+ * - Digital black glass visor with glowing cyan expressive eyes + voice-sync waveform mouth
  */
 @Composable
 fun MrStudyRobotAvatar(
@@ -233,14 +589,13 @@ fun MrStudyRobotAvatar(
     teacherAudioLevel: Float,
     userAudioLevel: Float,
     modifier: Modifier = Modifier,
-    avatarSize: Dp = 148.dp
+    avatarSize: Dp = 148.dp,
+    showBook: Boolean = false
 ) {
-    val activeAudio = if (status == LiveConnectionStatus.TEACHER_SPEAKING) {
-        teacherAudioLevel.coerceIn(0.15f, 1f)
-    } else if (status == LiveConnectionStatus.LISTENING) {
-        userAudioLevel.coerceIn(0f, 1f)
-    } else {
-        0f
+    val activeAudio = when (status) {
+        LiveConnectionStatus.TEACHER_SPEAKING -> teacherAudioLevel.coerceIn(0.18f, 1f)
+        LiveConnectionStatus.LISTENING -> userAudioLevel.coerceIn(0f, 1f)
+        else -> 0f
     }
 
     val smoothLevel by animateFloatAsState(
@@ -254,7 +609,7 @@ fun MrStudyRobotAvatar(
         initialValue = 0f,
         targetValue = (2f * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = FastOutSlowInEasing),
+            animation = tween(2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "robot_phase"
@@ -263,7 +618,7 @@ fun MrStudyRobotAvatar(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(3600),
+            animation = tween(3800),
             repeatMode = RepeatMode.Restart
         ),
         label = "robot_blink"
@@ -274,184 +629,211 @@ fun MrStudyRobotAvatar(
         val w = size.width
         val h = size.height
         val cx = w / 2f
-        val floatY = sin(phase) * (h * 0.018f)
+        val floatY = sin(phase) * (h * 0.022f)
 
         val isSpeaking = status == LiveConnectionStatus.TEACHER_SPEAKING
-        val headphoneGlow = if (isSpeaking) 0.55f + smoothLevel * 0.45f else 0.35f
+        val headphoneGlow = if (isSpeaking) 0.68f + smoothLevel * 0.32f else 0.48f
 
-        // Outer sound halo when talking/listening
         val haloColor = when (status) {
             LiveConnectionStatus.TEACHER_SPEAKING -> NeonPurplePrimary
-            LiveConnectionStatus.LISTENING -> ElectricBlueSecondary
-            LiveConnectionStatus.CONNECTING -> CyberCyanTertiary
-            else -> NeonPurplePrimary.copy(alpha = 0.5f)
+            LiveConnectionStatus.LISTENING -> CyberCyanTertiary
+            LiveConnectionStatus.CONNECTING -> ElectricBlueSecondary
+            else -> NeonPurplePrimary.copy(alpha = 0.65f)
         }
+
+        // Cosmic multi-layer energy aura behind robot
         drawCircle(
-            color = haloColor.copy(alpha = 0.14f + smoothLevel * 0.24f),
-            radius = w * (0.42f + smoothLevel * 0.09f),
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    haloColor.copy(alpha = 0.34f + smoothLevel * 0.25f),
+                    ElectricBlueSecondary.copy(alpha = 0.14f),
+                    Color.Transparent
+                ),
+                center = Offset(cx, h * 0.54f + floatY),
+                radius = w * (0.48f + smoothLevel * 0.08f)
+            ),
+            radius = w * (0.48f + smoothLevel * 0.08f),
             center = Offset(cx, h * 0.54f + floatY)
         )
+
         drawCircle(
-            color = haloColor.copy(alpha = 0.40f + smoothLevel * 0.35f),
-            radius = w * (0.37f + smoothLevel * 0.05f),
+            brush = Brush.linearGradient(listOf(CyberCyanTertiary.copy(alpha = 0.65f), NeonPurplePrimary.copy(alpha = 0.70f))),
+            radius = w * (0.40f + smoothLevel * 0.05f),
             center = Offset(cx, h * 0.54f + floatY),
-            style = Stroke(width = 2.dp.toPx())
+            style = Stroke(width = 1.6.dp.toPx())
         )
 
-        // Futuristic white-black body / shoulders at bottom
-        val bodyTop = h * 0.72f + floatY
+        // 3D-shaded white/silver chest & shoulders
+        val bodyTop = h * 0.70f + floatY
         drawRoundRect(
             color = Color(0xFF0F172A),
-            topLeft = Offset(cx - w * 0.23f, bodyTop),
-            size = Size(w * 0.46f, h * 0.22f),
-            cornerRadius = CornerRadius(w * 0.10f, w * 0.10f)
+            topLeft = Offset(cx - w * 0.24f, bodyTop),
+            size = Size(w * 0.48f, h * 0.22f),
+            cornerRadius = CornerRadius(w * 0.12f, w * 0.12f)
         )
-        // White futuristic chest armor plates
         drawRoundRect(
-            color = Color(0xFFF8FAFC),
-            topLeft = Offset(cx - w * 0.20f, bodyTop + h * 0.02f),
-            size = Size(w * 0.40f, h * 0.16f),
-            cornerRadius = CornerRadius(w * 0.08f, w * 0.08f)
+            brush = Brush.verticalGradient(
+                colors = listOf(Color(0xFFFFFFFF), Color(0xFFCBD5E1), Color(0xFF94A3B8))
+            ),
+            topLeft = Offset(cx - w * 0.21f, bodyTop + h * 0.02f),
+            size = Size(w * 0.42f, h * 0.17f),
+            cornerRadius = CornerRadius(w * 0.09f, w * 0.09f)
         )
-        // Glowing blue/purple chest core indicator
+        // Chest power core ("M" energy emblem)
         drawCircle(
-            color = if (isSpeaking) NeonPurplePrimary else ElectricBlueSecondary,
-            radius = w * (0.032f + smoothLevel * 0.012f),
-            center = Offset(cx, bodyTop + h * 0.10f)
+            brush = Brush.radialGradient(
+                colors = listOf(CyberCyanTertiary, NeonPurplePrimary)
+            ),
+            radius = w * (0.042f + smoothLevel * 0.015f),
+            center = Offset(cx, bodyTop + h * 0.105f)
         )
 
-        // Headphone Band (Neon Purple Glow)
+        // Headphone Band (3D metallic + neon glow)
         drawArc(
-            color = NeonPurplePrimary.copy(alpha = headphoneGlow),
-            startAngle = 190f,
-            sweepAngle = 160f,
+            brush = Brush.linearGradient(listOf(NeonPurplePrimary.copy(alpha = headphoneGlow), CyberCyanTertiary.copy(alpha = headphoneGlow))),
+            startAngle = 188f,
+            sweepAngle = 164f,
             useCenter = false,
-            topLeft = Offset(cx - w * 0.30f, h * 0.20f + floatY),
-            size = Size(w * 0.60f, h * 0.52f),
+            topLeft = Offset(cx - w * 0.31f, h * 0.20f + floatY),
+            size = Size(w * 0.62f, h * 0.52f),
             style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
         )
 
-        // Left & Right Glowing Purple Headphones
-        val earTop = h * 0.39f + floatY
-        val earH = h * 0.22f
-        val earW = w * 0.085f
-        // Left earcup
-        drawRoundRect(
-            color = Color(0xFF1E1B4B),
-            topLeft = Offset(cx - w * 0.33f, earTop),
-            size = Size(earW, earH),
-            cornerRadius = CornerRadius(earW * 0.45f, earW * 0.45f)
-        )
-        drawRoundRect(
-            color = NeonPurplePrimary.copy(alpha = headphoneGlow),
-            topLeft = Offset(cx - w * 0.32f, earTop + earH * 0.18f),
-            size = Size(earW * 0.55f, earH * 0.64f),
-            cornerRadius = CornerRadius(earW * 0.3f, earW * 0.3f)
-        )
-        // Right earcup
-        drawRoundRect(
-            color = Color(0xFF1E1B4B),
-            topLeft = Offset(cx + w * 0.33f - earW, earTop),
-            size = Size(earW, earH),
-            cornerRadius = CornerRadius(earW * 0.45f, earW * 0.45f)
-        )
-        drawRoundRect(
-            color = NeonPurplePrimary.copy(alpha = headphoneGlow),
-            topLeft = Offset(cx + w * 0.32f - earW * 0.55f, earTop + earH * 0.18f),
-            size = Size(earW * 0.55f, earH * 0.64f),
-            cornerRadius = CornerRadius(earW * 0.3f, earW * 0.3f)
-        )
+        // Left & Right 3D Glowing Earcups
+        val earTop = h * 0.38f + floatY
+        val earH = h * 0.23f
+        val earW = w * 0.092f
+        listOf(cx - w * 0.34f, cx + w * 0.34f - earW).forEachIndexed { idx, leftX ->
+            drawRoundRect(
+                brush = Brush.verticalGradient(listOf(Color(0xFF1E293B), Color(0xFF0F172A))),
+                topLeft = Offset(leftX, earTop),
+                size = Size(earW, earH),
+                cornerRadius = CornerRadius(earW * 0.45f, earW * 0.45f)
+            )
+            val glowOffset = if (idx == 0) leftX + earW * 0.22f else leftX + earW * 0.28f
+            drawRoundRect(
+                brush = Brush.verticalGradient(
+                    listOf(
+                        CyberCyanTertiary.copy(alpha = headphoneGlow),
+                        NeonPurplePrimary.copy(alpha = headphoneGlow)
+                    )
+                ),
+                topLeft = Offset(glowOffset, earTop + earH * 0.16f),
+                size = Size(earW * 0.50f, earH * 0.68f),
+                cornerRadius = CornerRadius(earW * 0.28f, earW * 0.28f)
+            )
+        }
 
-        // White futuristic Robot Head Outer Shell
-        val headLeft = cx - w * 0.26f
+        // 3D Spherical-Shaded White Futuristic Helmet
+        val headLeft = cx - w * 0.27f
         val headTop = h * 0.25f + floatY
-        val headW = w * 0.52f
-        val headH = h * 0.44f
+        val headW = w * 0.54f
+        val headH = h * 0.45f
         drawRoundRect(
-            color = Color(0xFFF8FAFC),
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0xFFFFFFFF), Color(0xFFE2E8F0), Color(0xFF94A3B8)),
+                center = Offset(cx - headW * 0.18f, headTop + headH * 0.22f),
+                radius = headW * 0.95f
+            ),
             topLeft = Offset(headLeft, headTop),
             size = Size(headW, headH),
-            cornerRadius = CornerRadius(w * 0.13f, w * 0.13f)
+            cornerRadius = CornerRadius(w * 0.14f, w * 0.14f)
         )
         drawRoundRect(
-            color = Color(0xFFCBD5E1),
+            color = CyberCyanTertiary.copy(alpha = 0.40f),
             topLeft = Offset(headLeft, headTop),
             size = Size(headW, headH),
-            cornerRadius = CornerRadius(w * 0.13f, w * 0.13f),
-            style = Stroke(width = 1.5.dp.toPx())
+            cornerRadius = CornerRadius(w * 0.14f, w * 0.14f),
+            style = Stroke(width = 1.4.dp.toPx())
         )
 
-        // Black Digital Face Visor Screen
+        // Deep Obsidian Glass Visor + Specular Top Reflection
         val visorLeft = headLeft + headW * 0.10f
         val visorTop = headTop + headH * 0.15f
         val visorW = headW * 0.80f
         val visorH = headH * 0.70f
         drawRoundRect(
-            color = Color(0xFF070B14),
+            brush = Brush.verticalGradient(listOf(Color(0xFF0A1022), Color(0xFF030712))),
             topLeft = Offset(visorLeft, visorTop),
             size = Size(visorW, visorH),
-            cornerRadius = CornerRadius(w * 0.09f, w * 0.09f)
+            cornerRadius = CornerRadius(w * 0.10f, w * 0.10f)
+        )
+        // Specular reflection arc on visor
+        drawRoundRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent)
+            ),
+            topLeft = Offset(visorLeft + visorW * 0.08f, visorTop + visorH * 0.06f),
+            size = Size(visorW * 0.84f, visorH * 0.24f),
+            cornerRadius = CornerRadius(w * 0.06f, w * 0.06f)
         )
 
-        // Expressive Glowing Purple Eyes
-        val eyeY = visorTop + visorH * 0.38f
-        val leftEyeX = cx - visorW * 0.22f
-        val rightEyeX = cx + visorW * 0.22f
-        val eyeW = visorW * 0.16f
-        val eyeH = if (isBlinking) 3.dp.toPx() else visorH * (0.24f + smoothLevel * 0.04f)
-        val eyeGlowColor = if (isSpeaking) Color(0xFFA855F7) else Color(0xFF8B5CF6)
+        // Expressive Cyber-Cyan Glowing Eyes (matching Görsel 1 & 2)
+        val eyeY = visorTop + visorH * 0.41f
+        val leftEyeX = cx - visorW * 0.21f
+        val rightEyeX = cx + visorW * 0.21f
+        val eyeW = visorW * 0.18f
+        val eyeH = if (isBlinking) 3.dp.toPx() else visorH * (0.28f + smoothLevel * 0.04f)
+        val eyeOuterGlow = if (isSpeaking) Color(0xFF38BDF8) else CyberCyanTertiary
 
-        // Soft purple eye aura
         if (!isBlinking) {
             drawCircle(
-                color = eyeGlowColor.copy(alpha = 0.28f),
-                radius = eyeW * 1.15f,
+                color = eyeOuterGlow.copy(alpha = 0.34f),
+                radius = eyeW * 1.2f,
                 center = Offset(leftEyeX, eyeY)
             )
             drawCircle(
-                color = eyeGlowColor.copy(alpha = 0.28f),
-                radius = eyeW * 1.15f,
+                color = eyeOuterGlow.copy(alpha = 0.34f),
+                radius = eyeW * 1.2f,
                 center = Offset(rightEyeX, eyeY)
             )
         }
         drawRoundRect(
-            color = Color(0xFFD8B4FE),
+            brush = Brush.verticalGradient(listOf(Color(0xFFA5F3FC), CyberCyanTertiary)),
             topLeft = Offset(leftEyeX - eyeW / 2f, eyeY - eyeH / 2f),
             size = Size(eyeW, eyeH),
             cornerRadius = CornerRadius(eyeW / 2f, eyeW / 2f)
         )
         drawRoundRect(
-            color = Color(0xFFD8B4FE),
+            brush = Brush.verticalGradient(listOf(Color(0xFFA5F3FC), CyberCyanTertiary)),
             topLeft = Offset(rightEyeX - eyeW / 2f, eyeY - eyeH / 2f),
             size = Size(eyeW, eyeH),
             cornerRadius = CornerRadius(eyeW / 2f, eyeW / 2f)
         )
 
-        // Synchronized Digital Mouth / Voice Waveform inside Visor
-        val mouthY = visorTop + visorH * 0.75f
-        val barCount = 5
-        val spacing = visorW * 0.09f
-        val startX = cx - ((barCount - 1) * spacing) / 2f
-        for (i in 0 until barCount) {
-            val barX = startX + i * spacing
-            val waveOffset = sin(phase * 2.5f + i * 1.1f)
-            val barH = if (isSpeaking || status == LiveConnectionStatus.LISTENING) {
-                (3.dp.toPx() + (smoothLevel * 12.dp.toPx()) * (0.55f + 0.45f * kotlin.math.abs(waveOffset)))
+        // Synchronized Voice Waveform / Happy Smile inside Visor
+        val mouthY = visorTop + visorH * 0.76f
+        if (isSpeaking || status == LiveConnectionStatus.LISTENING) {
+            val barCount = 5
+            val spacing = visorW * 0.095f
+            val startX = cx - ((barCount - 1) * spacing) / 2f
+            for (i in 0 until barCount) {
+                val barX = startX + i * spacing
+                val waveOffset = sin(phase * 2.6f + i * 1.1f)
+                val barH = (3.dp.toPx() + (smoothLevel * 12.dp.toPx()) * (0.55f + 0.45f * abs(waveOffset)))
                     .coerceAtMost(visorH * 0.26f)
-            } else {
-                if (i in 1..3) 3.dp.toPx() else 2.dp.toPx()
+                drawLine(
+                    color = if (status == LiveConnectionStatus.LISTENING) CyberCyanTertiary else Color(0xFFC084FC),
+                    start = Offset(barX, mouthY - barH / 2f),
+                    end = Offset(barX, mouthY + barH / 2f),
+                    strokeWidth = 3.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
             }
-            drawLine(
-                color = if (status == LiveConnectionStatus.LISTENING) CyberCyanTertiary else Color(0xFFC084FC),
-                start = Offset(barX, mouthY - barH / 2f),
-                end = Offset(barX, mouthY + barH / 2f),
-                strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round
+        } else {
+            drawArc(
+                color = Color(0xFF93C5FD),
+                startAngle = 15f,
+                sweepAngle = 150f,
+                useCenter = false,
+                topLeft = Offset(cx - visorW * 0.14f, mouthY - visorH * 0.10f),
+                size = Size(visorW * 0.28f, visorH * 0.14f),
+                style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
             )
         }
 
-        // Graduation Cap (Mezuniyet Kepi) on top of Robot Head
-        val capY = headTop + h * 0.02f
+        // Graduation Cap Floating Above Robot Head
+        val capY = headTop - h * 0.01f
         val capPath = Path().apply {
             moveTo(cx, capY - h * 0.14f)
             lineTo(cx + w * 0.25f, capY - h * 0.06f)
@@ -459,41 +841,58 @@ fun MrStudyRobotAvatar(
             lineTo(cx - w * 0.25f, capY - h * 0.06f)
             close()
         }
-        // Cap base crown
         drawRoundRect(
             color = Color(0xFF1E293B),
             topLeft = Offset(cx - w * 0.13f, capY - h * 0.05f),
-            size = Size(w * 0.26f, h * 0.07f),
+            size = Size(w * 0.26f, h * 0.065f),
             cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
         )
-        // Cap diamond mortarboard
-        drawPath(path = capPath, color = Color(0xFF0F172A))
         drawPath(
             path = capPath,
-            color = NeonPurplePrimary.copy(alpha = 0.85f),
+            brush = Brush.linearGradient(listOf(Color(0xFF1E1B4B), Color(0xFF312E81)))
+        )
+        drawPath(
+            path = capPath,
+            color = NeonPurplePrimary.copy(alpha = 0.90f),
             style = Stroke(width = 1.6.dp.toPx(), join = StrokeJoin.Round)
         )
-        // Golden/Cyan Tassel hanging on the right
         val tasselEnd = Offset(cx + w * 0.23f, capY + h * 0.06f)
         drawLine(
-            color = Color(0xFFFBBF24),
+            color = GoldStreakAccent,
             start = Offset(cx, capY - h * 0.06f),
             end = Offset(cx + w * 0.22f, capY - h * 0.05f),
             strokeWidth = 2.dp.toPx(),
             cap = StrokeCap.Round
         )
         drawLine(
-            color = Color(0xFFFBBF24),
+            color = GoldStreakAccent,
             start = Offset(cx + w * 0.22f, capY - h * 0.05f),
             end = tasselEnd,
             strokeWidth = 2.2.dp.toPx(),
             cap = StrokeCap.Round
         )
-        drawCircle(
-            color = Color(0xFFFBBF24),
-            radius = 3.2.dp.toPx(),
-            center = tasselEnd
-        )
+        drawCircle(color = GoldStreakAccent, radius = 3.2.dp.toPx(), center = tasselEnd)
+
+        // Optional Mini Glowing Hologram Book (matches Görsel 2 mascot reading pose)
+        if (showBook) {
+            val bkW = w * 0.26f
+            val bkH = h * 0.13f
+            val bkX = cx + w * 0.15f
+            val bkY = bodyTop + h * 0.04f
+            drawRoundRect(
+                brush = Brush.linearGradient(listOf(ElectricBlueSecondary.copy(alpha = 0.85f), CyberCyanTertiary.copy(alpha = 0.75f))),
+                topLeft = Offset(bkX, bkY),
+                size = Size(bkW, bkH),
+                cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+            )
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.65f),
+                topLeft = Offset(bkX + 2.dp.toPx(), bkY + 2.dp.toPx()),
+                size = Size(bkW - 4.dp.toPx(), bkH - 4.dp.toPx()),
+                cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
     }
 }
 
@@ -506,7 +905,8 @@ fun SmartBoardCanvas(
     payload: SmartBoardPayload?,
     isGenerating: Boolean,
     subject: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onCustomizeClick: (() -> Unit)? = null
 ) {
     val drawProgress = remember(payload) { Animatable(0f) }
     LaunchedEffect(payload) {
@@ -519,25 +919,30 @@ fun SmartBoardCanvas(
 
     GlassCard(
         modifier = modifier.fillMaxWidth(),
-        cornerRadius = 20.dp,
-        accentBorder = CyberCyanTertiary,
-        containerColor = Color(0xFF0E1628).copy(alpha = 0.90f)
+        cornerRadius = 22.dp,
+        accentBorder = ElectricBlueSecondary,
+        secondaryBorder = NeonPurplePrimary,
+        containerColor = Color(0xFF0D1528).copy(alpha = 0.92f)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         modifier = Modifier
                             .size(9.dp)
                             .clip(CircleShape)
-                            .background(if (isGenerating) Color(0xFFF59E0B) else CyberCyanTertiary)
+                            .background(if (isGenerating) CyberCyanTertiary else Color(0xFFF59E0B))
                     )
                     Text(
                         text = payload?.boardTitle?.ifBlank { "$subject • Dijital Akıllı Tahta" }
@@ -549,12 +954,19 @@ fun SmartBoardCanvas(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+
                 Surface(
-                    color = NeonPurplePrimary.copy(alpha = 0.25f),
-                    shape = RoundedCornerShape(8.dp)
+                    color = NeonPurplePrimary.copy(alpha = 0.24f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, CyberCyanTertiary.copy(alpha = 0.45f)),
+                    modifier = if (onCustomizeClick != null) {
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onCustomizeClick)
+                    } else Modifier
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -562,12 +974,13 @@ fun SmartBoardCanvas(
                             imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
                             tint = CyberCyanTertiary,
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(13.dp)
                         )
                         Text(
-                            text = if (isGenerating) "Çiziliyor..." else "Akıllı Tahta",
+                            text = if (isGenerating) "Çiziliyor..." else if (onCustomizeClick != null) "Özelleştir" else "Akıllı Tahta",
                             style = MaterialTheme.typography.labelSmall,
-                            color = CyberCyanTertiary
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
                         )
                     }
                 }
@@ -577,28 +990,65 @@ fun SmartBoardCanvas(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(106.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF070D19)),
-                    contentAlignment = Alignment.Center
+                        .height(114.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF060B16))
                 ) {
                     SmartBoardGridBackground()
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(12.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = "Dijital Akıllı Tahta Hazır",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = CyberCyanTertiary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "\"Tahtaya Çiz\" düğmesine bas veya ders anlatırken önemli üçgen, grafik ve formülleri buraya yansıt.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF94A3B8)
-                        )
+                        // Sleek Neon Smart Monitor Preview Box
+                        Surface(
+                            color = Color(0xFF0F1B33),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(
+                                1.2.dp,
+                                Brush.linearGradient(listOf(CyberCyanTertiary, NeonPurplePrimary))
+                            ),
+                            modifier = Modifier.size(width = 88.dp, height = 74.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = ElectricBlueSecondary.copy(alpha = 0.30f),
+                                    border = BorderStroke(1.dp, CyberCyanTertiary),
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Dijital Akıllı Tahta Hazır",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = CyberCyanTertiary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "\"Tahtaya Çiz\" düğmesine bas veya ders anlatırken önemli üçgen, grafik ve formülleri buraya yansıt.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFCBD5E1),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             } else {
@@ -606,9 +1056,9 @@ fun SmartBoardCanvas(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(132.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF070D19))
+                        .height(136.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF060B16))
                 ) {
                     SmartBoardGridBackground()
                     if (primaryElement != null) {
@@ -719,7 +1169,6 @@ private fun AnimatedSmartBoardElement(
                         }
                     }
                     if (progress > 0.7f) {
-                        // Right-angle or vertex highlights
                         listOf(a, b, c).forEach { pt ->
                             drawCircle(
                                 color = NeonPurplePrimary,
@@ -730,7 +1179,6 @@ private fun AnimatedSmartBoardElement(
                     }
                 }
                 SmartBoardElementType.GRAPH -> {
-                    // X & Y Axes
                     drawLine(
                         color = Color(0xFF64748B),
                         start = Offset(w * 0.10f, h * 0.12f),
@@ -805,7 +1253,6 @@ private fun AnimatedSmartBoardElement(
                     }
                 }
                 SmartBoardElementType.FORMULA -> {
-                    // Glowing holographic formula frame + wave pulse
                     val frameW = w * 0.88f * progress.coerceAtLeast(0.15f)
                     drawRoundRect(
                         color = NeonPurplePrimary.copy(alpha = 0.16f),

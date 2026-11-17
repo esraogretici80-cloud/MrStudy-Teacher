@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.BarChart
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import com.example.data.local.LocalParentMetrics
 import com.example.ui.components.GlassCard
 import com.example.ui.components.MrStudy3Backdrop
+import com.example.ui.components.pressableScale
 import com.example.ui.state.MrStudyUiState
 import com.example.ui.theme.CyberCyanTertiary
 import com.example.ui.theme.DangerRed
@@ -78,6 +81,7 @@ fun ParentPanelScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -120,7 +124,7 @@ fun ParentPanelScreen(
                             textAlign = TextAlign.Center
                         )
 
-                        // 4 PIN Dots
+                        // 4 PIN Dots with animated color
                         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             repeat(4) { idx ->
                                 val filled = idx < enteredPin.length
@@ -131,7 +135,7 @@ fun ParentPanelScreen(
                                         .background(
                                             when {
                                                 pinError -> DangerRed
-                                                filled -> NeonPurplePrimary
+                                                filled -> CyberCyanTertiary
                                                 else -> Color(0xFF1E293B)
                                             }
                                         )
@@ -147,7 +151,7 @@ fun ParentPanelScreen(
                             )
                         }
 
-                        // Numeric Keypad
+                        // Numeric Keypad with tactile pressableScale
                         val rows = listOf(
                             listOf("1", "2", "3"),
                             listOf("4", "5", "6"),
@@ -161,9 +165,10 @@ fun ParentPanelScreen(
                                         Surface(
                                             shape = CircleShape,
                                             color = Color(0xFF1E293B).copy(alpha = 0.9f),
-                                            border = BorderStroke(1.dp, NeonPurplePrimary.copy(alpha = 0.35f)),
+                                            border = BorderStroke(1.dp, NeonPurplePrimary.copy(alpha = 0.45f)),
                                             modifier = Modifier
                                                 .size(64.dp)
+                                                .pressableScale()
                                                 .clip(CircleShape)
                                                 .clickable {
                                                     pinError = false

@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,8 +39,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -58,24 +60,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.FlashcardItem
 import com.example.data.model.PdfResourceRecord
 import com.example.data.model.StudyNote
 import com.example.data.model.StudyPlanItem
 import com.example.data.model.SubjectCatalog
+import com.example.ui.components.GlassCard
 import com.example.ui.components.MrStudy3Backdrop
+import com.example.ui.components.NeonGradientButton
+import com.example.ui.components.SubScreenTopBar
 import com.example.ui.state.MrStudyUiState
+import com.example.ui.theme.CyberCyanTertiary
+import com.example.ui.theme.DeepNavyBar
+import com.example.ui.theme.ElectricBlueSecondary
+import com.example.ui.theme.NeonPurplePrimary
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.WarningAmber
 
 @Composable
 fun StudyHubScreen(
     state: MrStudyUiState,
+    onBack: () -> Unit = {},
     onAddPlan: (String, String, String, Long, String, String, String) -> Unit,
     onGenerateAiPlan: (String, String) -> Unit,
     onTogglePlan: (StudyPlanItem) -> Unit,
@@ -95,39 +107,65 @@ fun StudyHubScreen(
 
     MrStudy3Backdrop {
         Column(modifier = Modifier.fillMaxSize()) {
-            TabRow(selectedTabIndex = selectedTab) {
+            SubScreenTopBar(
+                title = "Notlar & Çalışma Planı",
+                subtitle = "Plan, AI Özet, Çalışma Kağıdı & Bilgi Kartları",
+                onBack = onBack,
+                accentColor = NeonPurplePrimary,
+                badgeText = "${state.notes.size} Not"
+            )
+
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = DeepNavyBar.copy(alpha = 0.90f),
+                contentColor = CyberCyanTertiary
+            ) {
                 tabs.forEachIndexed { idx, title ->
                     Tab(
                         selected = selectedTab == idx,
                         onClick = { selectedTab = idx },
-                        text = { Text(title, maxLines = 1) }
+                        text = {
+                            Text(
+                                text = title,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (selectedTab == idx) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
                     )
                 }
             }
 
-            when (selectedTab) {
-                0 -> StudyPlansTab(
-                    state = state,
-                    onAddPlan = onAddPlan,
-                    onGenerateAiPlan = onGenerateAiPlan,
-                    onTogglePlan = onTogglePlan,
-                    onPostponePlan = onPostponePlan,
-                    onDeletePlan = onDeletePlan
-                )
-                1 -> SmartNotesTab(
-                    state = state,
-                    onGenerateAiNote = onGenerateAiNote,
-                    onSaveNote = onSaveNote,
-                    onDeleteNote = onDeleteNote,
-                    onExportNotePdf = onExportNotePdf,
-                    onExportNoteWorksheet = onExportNoteWorksheet
-                )
-                2 -> FlashcardsTab(
-                    state = state,
-                    onGenerateAiFlashcards = onGenerateAiFlashcards,
-                    onReviewFlashcard = onReviewFlashcard,
-                    onDeleteFlashcard = onDeleteFlashcard
-                )
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "study_hub_tab_content",
+                modifier = Modifier.weight(1f)
+            ) { tab ->
+                when (tab) {
+                    0 -> StudyPlansTab(
+                        state = state,
+                        onAddPlan = onAddPlan,
+                        onGenerateAiPlan = onGenerateAiPlan,
+                        onTogglePlan = onTogglePlan,
+                        onPostponePlan = onPostponePlan,
+                        onDeletePlan = onDeletePlan
+                    )
+                    1 -> SmartNotesTab(
+                        state = state,
+                        onGenerateAiNote = onGenerateAiNote,
+                        onSaveNote = onSaveNote,
+                        onDeleteNote = onDeleteNote,
+                        onExportNotePdf = onExportNotePdf,
+                        onExportNoteWorksheet = onExportNoteWorksheet
+                    )
+                    else -> FlashcardsTab(
+                        state = state,
+                        onGenerateAiFlashcards = onGenerateAiFlashcards,
+                        onReviewFlashcard = onReviewFlashcard,
+                        onDeleteFlashcard = onDeleteFlashcard
+                    )
+                }
             }
         }
     }
@@ -156,22 +194,16 @@ private fun StudyPlansTab(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
-                    onClick = { showAiDialog = true },
+                NeonGradientButton(
+                    text = if (state.isGeneratingPlan) "Oluşturuluyor..." else "AI Haftalık Plan",
+                    icon = Icons.Default.AutoAwesome,
                     enabled = !state.isGeneratingPlan,
+                    onClick = { showAiDialog = true },
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp)
                         .testTag("generate_ai_plan_button")
-                ) {
-                    if (state.isGeneratingPlan) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("AI Haftalık Plan")
-                }
+                )
                 OutlinedButton(
                     onClick = { showAddDialog = true },
                     modifier = Modifier
@@ -181,20 +213,16 @@ private fun StudyPlansTab(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Manuel Ekle")
+                    Text("Manuel Ekle", maxLines = 1)
                 }
             }
         }
 
         if (state.studyPlans.isEmpty()) {
             item {
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Henüz çalışma planın yok", style = MaterialTheme.typography.titleMedium)
+                GlassCard(accentBorder = ElectricBlueSecondary, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Henüz çalışma planın yok", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "Eksik konularına ve sınav tarihine göre AI Haftalık Plan oluştur veya kendi ders programını ekle.",
@@ -207,15 +235,9 @@ private fun StudyPlansTab(
             }
         } else {
             items(state.studyPlans, key = { it.id }) { plan ->
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (plan.isCompleted) {
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                        } else {
-                            MaterialTheme.colorScheme.surface
-                        }
-                    ),
+                GlassCard(
+                    cornerRadius = 18.dp,
+                    accentBorder = if (plan.isCompleted) SuccessGreen else NeonPurplePrimary,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -224,11 +246,11 @@ private fun StudyPlansTab(
                                 Icon(
                                     imageVector = if (plan.isCompleted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                     contentDescription = "Tamamlandı İşaretle",
-                                    tint = if (plan.isCompleted) SuccessGreen else MaterialTheme.colorScheme.primary
+                                    tint = if (plan.isCompleted) SuccessGreen else CyberCyanTertiary
                                 )
                             }
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(plan.topic, style = MaterialTheme.typography.titleSmall)
+                                Text(plan.topic, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = "${plan.subject} • ${plan.dayLabel} • ${plan.durationMinutes} dk • ${plan.planType}",
                                     style = MaterialTheme.typography.bodySmall,
@@ -238,7 +260,7 @@ private fun StudyPlansTab(
                                     Text(
                                         text = "Sınav Tarihi: ${plan.examDateText}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.secondary
+                                        color = CyberCyanTertiary
                                     )
                                 }
                             }
@@ -422,38 +444,32 @@ private fun SmartNotesTab(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
-                    onClick = { showAiNoteDialog = true },
+                NeonGradientButton(
+                    text = if (state.isGeneratingNote) "Çıkarılıyor..." else "AI Özet & Formül",
+                    icon = Icons.Default.AutoAwesome,
                     enabled = !state.isGeneratingNote,
+                    onClick = { showAiNoteDialog = true },
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(1.1f)
                         .heightIn(min = 48.dp)
                         .testTag("ai_note_button")
-                ) {
-                    if (state.isGeneratingNote) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("AI Özet & Formül Çıkar")
-                }
+                )
                 OutlinedButton(
                     onClick = { editingNote = StudyNote(subject = "Matematik") },
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(0.9f)
                         .heightIn(min = 48.dp)
                         .testTag("new_note_button")
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Yeni Not")
+                    Text("Yeni Not", maxLines = 1)
                 }
             }
         }
 
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 (listOf("Tümü") + state.notes.map { it.subject }.distinct()).forEach { subj ->
                     FilterChip(
                         selected = filterSubject == subj,
@@ -466,13 +482,10 @@ private fun SmartNotesTab(
 
         if (filteredNotes.isEmpty()) {
             item {
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Henüz ders notu yok", style = MaterialTheme.typography.titleMedium)
+                GlassCard(accentBorder = CyberCyanTertiary, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Henüz ders notu yok", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "AI ile otomatik konu özeti, formüller ve tanımlar çıkarabilir veya kendi notunu yazıp PDF olarak dışa aktarabilirsin.",
                             style = MaterialTheme.typography.bodySmall,
@@ -484,9 +497,9 @@ private fun SmartNotesTab(
             }
         } else {
             items(filteredNotes, key = { it.id }) { note ->
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                GlassCard(
+                    cornerRadius = 20.dp,
+                    accentBorder = CyberCyanTertiary,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -496,16 +509,16 @@ private fun SmartNotesTab(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(note.title, style = MaterialTheme.typography.titleMedium)
+                                Text(note.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = note.subject + if (note.sourcePdfTitle.isNotBlank()) " • ${note.sourcePdfTitle}" else "",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.secondary
+                                    color = CyberCyanTertiary
                                 )
                             }
                             Row {
                                 IconButton(onClick = { onExportNotePdf(note) }) {
-                                    Icon(Icons.Default.PictureAsPdf, contentDescription = "PDF Olarak Dışa Aktar")
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = "PDF Olarak Dışa Aktar", tint = CyberCyanTertiary)
                                 }
                                 IconButton(onClick = { editingNote = note }) {
                                     Icon(Icons.Default.Edit, contentDescription = "Notu Düzenle")
@@ -520,12 +533,13 @@ private fun SmartNotesTab(
 
                         if (note.formulas.isNotEmpty()) {
                             Surface(
-                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+                                color = ElectricBlueSecondary.copy(alpha = 0.16f),
+                                border = BorderStroke(1.dp, ElectricBlueSecondary.copy(alpha = 0.35f)),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text("Formüller", style = MaterialTheme.typography.labelLarge)
+                                    Text("Formüller", style = MaterialTheme.typography.labelLarge, color = CyberCyanTertiary)
                                     note.formulas.forEach { f ->
                                         Text("• $f", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                                     }
@@ -535,12 +549,13 @@ private fun SmartNotesTab(
 
                         if (note.definitions.isNotEmpty()) {
                             Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                color = NeonPurplePrimary.copy(alpha = 0.16f),
+                                border = BorderStroke(1.dp, NeonPurplePrimary.copy(alpha = 0.35f)),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text("Tanımlar", style = MaterialTheme.typography.labelLarge)
+                                    Text("Tanımlar", style = MaterialTheme.typography.labelLarge, color = Color(0xFFDDD6FE))
                                     note.definitions.forEach { d ->
                                         Text("• $d", style = MaterialTheme.typography.bodySmall)
                                     }
@@ -561,6 +576,7 @@ private fun SmartNotesTab(
                             enabled = !state.isExportingWorksheet,
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .heightIn(min = 48.dp)
                                 .testTag("export_note_worksheet_button")
                         ) {
                             if (state.isExportingWorksheet) {
@@ -737,7 +753,7 @@ private fun FlashcardsTab(
                     FilterChip(
                         selected = showDueOnly,
                         onClick = { showDueOnly = true },
-                        label = { Text("Tekrar Zamanı (${state.flashcards.count { it.masteryStatus != "learned" || it.nextReviewAtMs <= now }})") }
+                        label = { Text("Tekrar (${state.flashcards.count { it.masteryStatus != "learned" || it.nextReviewAtMs <= now }})") }
                     )
                     FilterChip(
                         selected = !showDueOnly,
@@ -763,15 +779,13 @@ private fun FlashcardsTab(
 
         if (activeCard != null) {
             item {
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (flipped) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
-                    ),
+                GlassCard(
+                    onClick = { flipped = !flipped },
+                    cornerRadius = 24.dp,
+                    accentBorder = if (flipped) CyberCyanTertiary else NeonPurplePrimary,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 210.dp)
-                        .clickable { flipped = !flipped }
                 ) {
                     Box(
                         modifier = Modifier
@@ -786,11 +800,14 @@ private fun FlashcardsTab(
                             ) {
                                 Text(
                                     text = "${activeCard.subject} • ${activeCard.cardType} • ${if (isBack) "CEVAP" else "SORU / KAVRAM"}",
-                                    style = MaterialTheme.typography.labelMedium
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = CyberCyanTertiary,
+                                    fontWeight = FontWeight.Bold
                                 )
                                 Text(
                                     text = if (isBack) activeCard.back else activeCard.front,
                                     style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
@@ -822,7 +839,9 @@ private fun FlashcardsTab(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Tekrar Edilmeli")
                     }
-                    Button(
+                    NeonGradientButton(
+                        text = "Öğrenildi ✓",
+                        icon = Icons.Default.CheckCircle,
                         onClick = {
                             flipped = false
                             onReviewFlashcard(activeCard, true)
@@ -830,22 +849,15 @@ private fun FlashcardsTab(
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 50.dp)
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Öğrenildi ✓")
-                    }
+                    )
                 }
             }
         } else {
             item {
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Tekrar edilecek kart kalmadı!", style = MaterialTheme.typography.titleMedium)
+                GlassCard(accentBorder = SuccessGreen, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Tekrar edilecek kart kalmadı!", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "Harika gidiyorsun. Yeni konulardan otomatik Soru-Cevap, Kavram ve Formül kartları üretebilirsin.",
                             style = MaterialTheme.typography.bodySmall,
@@ -859,21 +871,17 @@ private fun FlashcardsTab(
 
         if (state.flashcards.isNotEmpty()) {
             item {
-                Text("Destendeki Tüm Kartlar", style = MaterialTheme.typography.titleMedium)
+                Text("Destendeki Tüm Kartlar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
             items(state.flashcards, key = { it.id }) { card ->
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                GlassCard(cornerRadius = 16.dp, accentBorder = ElectricBlueSecondary, modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("${card.cardType} • ${card.subject}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                            Text(card.front, style = MaterialTheme.typography.titleSmall)
+                            Text("${card.cardType} • ${card.subject}", style = MaterialTheme.typography.labelSmall, color = CyberCyanTertiary)
+                            Text(card.front, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                             Text(card.back, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton(onClick = { onDeleteFlashcard(card.id) }) {

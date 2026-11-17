@@ -6,9 +6,11 @@ import androidx.compose.ui.graphics.Color
 val SpaceBlackBackground = Color(0xFF0B0F19)
 val SpaceGlassSurface = Color(0xFF141B2D)
 val SpaceGlassVariant = Color(0xFF1E293B)
+val DeepNavyBar = Color(0xFF0C1222)
 val SpaceTextPrimary = Color(0xFFF1F5F9)
 val SpaceTextSecondary = Color(0xFF94A3B8)
 val SpaceGlassOutline = Color(0xFF334155)
+val GoldStreakAccent = Color(0xFFFBBF24)
 
 val NeonPurplePrimary = Color(0xFF8B5CF6)
 val OnNeonPurple = Color(0xFFFFFFFF)
