@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "MrStudy"
+rootProject.name = "MrStudy 4.0"
 
 include(":app")

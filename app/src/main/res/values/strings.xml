@@ -1,3 +1,13 @@
 <resources>
-    <string name="app_name">MrStudy</string>
+    <string name="app_name">MrStudy 4.0</string>
+    <string name="widget_ai_teacher_label">MrStudy • AI Öğretmen Kısayolu</string>
+    <string name="widget_daily_goal_label">MrStudy • Günlük Çalışma Hedefi</string>
+    <string name="widget_flashcard_label">MrStudy • Bilgi Kartları (Flashcard)</string>
+    <string name="widget_schedule_label">MrStudy • Ders Programı</string>
+    <string name="widget_xp_streak_label">MrStudy • XP ve Seri</string>
+    <string name="widget_exam_countdown_label">MrStudy • Sınav Geri Sayımı</string>
+    <string name="widget_stopwatch_label">MrStudy • Çalışma Kronometresi</string>
+    <string name="widget_quick_note_label">MrStudy • Hızlı Ders Notu</string>
+    <string name="widget_daily_question_label">MrStudy • Günün Sorusu</string>
+    <string name="widget_motivation_label">MrStudy • Günün Motivasyon Sözü</string>
 </resources>

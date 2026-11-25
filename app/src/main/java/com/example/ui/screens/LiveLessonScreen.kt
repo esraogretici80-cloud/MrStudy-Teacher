@@ -113,6 +113,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import com.example.ui.components.RichMarkdownText
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -457,7 +458,7 @@ fun LiveLessonScreen(
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = liveState.errorMessage.orEmpty(),
@@ -465,13 +466,26 @@ fun LiveLessonScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f)
                             )
-                            TextButton(onClick = onDismissError) { Text("Kapat") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Button(
+                                    onClick = {
+                                        if (hasMicPermission) {
+                                            onStartLiveSession()
+                                        } else {
+                                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.testTag("live_reconnect_button")
+                                ) {
+                                    Text("Yeniden Bağlan", style = MaterialTheme.typography.labelSmall)
+                                }
+                                TextButton(onClick = onDismissError) { Text("Kapat") }
+                            }
                         }
-                        val token = liveState.debugAppCheckToken
-                        if (!token.isNullOrBlank()) {
-                            AppCheckTokenQuickCard(
-                                debugToken = token,
-                                onOpenSetupDialog = onOpenAppCheckSetup
+                        if (liveState.isAppCheckError) {
+                            AppCheckStatusQuickCard(
+                                onOpenStatusDialog = onOpenAppCheckSetup
                             )
                         }
                     }
@@ -1723,11 +1737,18 @@ private fun LiveTranscriptBubble(entry: LiveTranscriptEntry) {
                     }
                 }
                 Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = entry.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White
-                )
+                if (entry.isStudent) {
+                    Text(
+                        text = entry.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White
+                    )
+                } else {
+                    RichMarkdownText(
+                        markdown = entry.text,
+                        color = Color.White
+                    )
+                }
             }
         }
     }

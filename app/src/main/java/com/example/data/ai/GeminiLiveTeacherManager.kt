@@ -22,8 +22,9 @@ import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
-import com.example.core.getLocalAppCheckDebugToken
+import com.example.core.formatAppCheckUserError
 import com.example.core.isAppCheckErrorMessage
+import com.example.core.verifyOrRefreshAppCheckToken
 import com.example.data.model.StudentProfile
 import com.example.data.model.TeachingMode
 import com.google.firebase.Firebase
@@ -48,7 +49,6 @@ import com.google.firebase.ai.type.activityDetectionConfig
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.liveGenerationConfig
 import com.google.firebase.ai.type.realtimeInputConfig
-import com.google.firebase.appcheck.FirebaseAppCheck
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,7 +111,7 @@ data class LiveLessonUiState(
     val activeAudioDeviceName: String = "Hoparlör",
     val isSpeakerForced: Boolean = false,
     val errorMessage: String? = null,
-    val debugAppCheckToken: String? = null,
+    val isAppCheckError: Boolean = false,
     val statusNotice: String? = null
 ) {
     val isSessionActive: Boolean
@@ -125,10 +125,11 @@ data class LiveLessonUiState(
         const val FALLBACK_LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
         val voiceOptions = listOf(
-            LiveVoiceOption("KORE", "Enerjik Öğretmen", "Canlı, tempolu ve motive edici anlatım"),
-            LiveVoiceOption("CHARON", "Sakin Rehber", "Dengeli, yumuşak ve sabırlı ton"),
             LiveVoiceOption("AOEDE", "Genç Asistan", "Samimi, akıcı ve arkadaşça üslup"),
-            LiveVoiceOption("FENRIR", "Tok ve Ciddi Hoca", "Net, disiplinli ve sınav odaklı")
+            LiveVoiceOption("CHARON", "Sakin Öğretmen", "Dengeli, sabırlı ve sakin ton"),
+            LiveVoiceOption("KORE", "Enerjik Öğretmen", "Canlı, tempolu ve motive edici anlatım"),
+            LiveVoiceOption("FENRIR", "Resmî Anlatım", "Net, disiplinli ve sınav odaklı üslup"),
+            LiveVoiceOption("PUCK", "Yumuşak Anlatım", "Yumuşak, rahatlatıcı ve tane tane ses")
         )
     }
 }
@@ -162,6 +163,7 @@ class GeminiLiveTeacherManager {
 
     // Echo & turn-state coordination
     private val isReceivingTeacherAudio = AtomicBoolean(false)
+    private val isSessionClosing = AtomicBoolean(false)
     private val playbackDrainDeadlineMs = AtomicLong(0L)
     private val forceBargeInWindowUntilMs = AtomicLong(0L)
     private val unmuteSpeechGraceUntilMs = AtomicLong(0L)
@@ -189,7 +191,7 @@ class GeminiLiveTeacherManager {
         _state.update {
             it.copy(
                 errorMessage = null,
-                debugAppCheckToken = null,
+                isAppCheckError = false,
                 statusNotice = null,
                 status = if (it.status == LiveConnectionStatus.ERROR) LiveConnectionStatus.IDLE else it.status
             )
@@ -341,6 +343,8 @@ class GeminiLiveTeacherManager {
     ) {
         val appContext = context.applicationContext
         stopSessionInternal(resetTranscripts = true)
+        isSessionClosing.set(false)
+        resumptionHandle = null
 
         _state.update {
             it.copy(
@@ -353,14 +357,14 @@ class GeminiLiveTeacherManager {
                 transcriptItems = emptyList(),
                 elapsedSeconds = 0,
                 errorMessage = null,
-                debugAppCheckToken = null,
+                isAppCheckError = false,
                 statusNotice = null
             )
         }
 
         sessionScopeJob = scope.launch(Dispatchers.IO) {
             try {
-                ensureAppCheckReady()
+                ensureAppCheckReady(appContext)
 
                 val selectedVoice = _state.value.selectedVoice
                 val systemInstructionContent = buildLiveSystemInstruction(
@@ -373,13 +377,13 @@ class GeminiLiveTeacherManager {
                 )
 
                 val echoGuard = _state.value.echoGuardEnabled
-                val (session, usedModel) = connectWithFallback(
+                var (currentSession, usedModel) = connectWithFallback(
                     voiceName = selectedVoice,
                     echoGuardEnabled = echoGuard,
                     systemInstruction = systemInstructionContent,
                     resumeHandle = null
                 )
-                liveSession = session
+                liveSession = currentSession
 
                 configureCommunicationAudioRouting(appContext)
 
@@ -402,7 +406,7 @@ class GeminiLiveTeacherManager {
                 if (initialPdfBitmap != null && !pdfTitle.isNullOrBlank()) {
                     runCatching {
                         val jpegBytes = compressBitmapToJpeg(initialPdfBitmap)
-                        session.sendVideoRealtime(InlineData(jpegBytes, "image/jpeg"))
+                        currentSession.sendVideoRealtime(InlineData(jpegBytes, "image/jpeg"))
                     }
                 }
 
@@ -411,7 +415,7 @@ class GeminiLiveTeacherManager {
                     val pdfHint = if (!pdfTitle.isNullOrBlank()) {
                         " Öğrencinin elinde '$pdfTitle' PDF'inin ${activePdfPage ?: 1}. sayfası açık."
                     } else ""
-                    session.send(
+                    currentSession.send(
                         "Merhaba hocam! Canlı ders anlatımına başlayalım. Konu: $subject.$pdfHint " +
                             "Kısaca sıcak bir merhaba de ve bugün hangi konuyu veya soruyu çalışmak istediğimi sor."
                     )
@@ -425,33 +429,76 @@ class GeminiLiveTeacherManager {
                     runSpeakingStatusMonitorLoop()
                 }
 
-                val micJob = launch(Dispatchers.IO) {
-                    runMicrophoneLoop(session)
-                }
+                var resumeAttempts = 0
+                val maxResumeAttempts = 2
+                while (isActive && !isSessionClosing.get()) {
+                    val activeSess = currentSession
+                    val micJob = launch(Dispatchers.IO) {
+                        runMicrophoneLoop(activeSess)
+                    }
+                    var loopError: Throwable? = null
+                    val receiveJob = launch(Dispatchers.IO) {
+                        try {
+                            runReceiveLoop(activeSess, queue, track, onUserPageCommand)
+                        } catch (t: Throwable) {
+                            loopError = t
+                        }
+                    }
 
-                val receiveJob = launch(Dispatchers.IO) {
-                    runReceiveLoop(session, queue, track, onUserPageCommand)
-                }
+                    receiveJob.join()
+                    micJob.cancel()
 
-                receiveJob.join()
-                micJob.cancel()
+                    val err = loopError
+                    if (isSessionClosing.get() || !isActive) break
+                    if (err is CancellationException) throw err
+
+                    val handle = resumptionHandle
+                    val recoverable = (err == null || isChannelClosedError(err)) &&
+                        resumeAttempts < maxResumeAttempts
+                    if (recoverable) {
+                        resumeAttempts++
+                        _state.update {
+                            it.copy(
+                                status = LiveConnectionStatus.CONNECTING,
+                                statusNotice = "Canlı bağlantı sunucu tarafından yenileniyor ($resumeAttempts/$maxResumeAttempts)..."
+                            )
+                        }
+                        runCatching { activeSess.stopReceiving() }
+                        runCatching { activeSess.close() }
+                        delay(350L)
+                        val reconnected = connectWithFallback(
+                            voiceName = selectedVoice,
+                            echoGuardEnabled = echoGuard,
+                            systemInstruction = systemInstructionContent,
+                            resumeHandle = handle
+                        )
+                        currentSession = reconnected.first
+                        liveSession = currentSession
+                        _state.update {
+                            it.copy(
+                                status = if (it.isMuted) LiveConnectionStatus.MUTED else LiveConnectionStatus.LISTENING,
+                                activeModelName = reconnected.second,
+                                statusNotice = "Canlı ders bağlantısı yenilendi. Kaldığın yerden devam edebilirsin."
+                            )
+                        }
+                    } else {
+                        throw (err ?: IllegalStateException("Channel was closed by the server."))
+                    }
+                }
                 playbackJob.cancel()
                 statusSyncJob.cancel()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (isSessionClosing.get()) return@launch
                 Log.e(TAG, "Gemini Live session failed", e)
                 val mappedMsg = mapLiveErrorMessage(e)
-                val debugToken = if (isAppCheckErrorMessage(mappedMsg)) {
-                    getLocalAppCheckDebugToken(appContext)
-                } else {
-                    null
-                }
+                val appCheckErr = isAppCheckErrorMessage(mappedMsg) || isAppCheckErrorMessage(e.localizedMessage)
                 _state.update {
                     it.copy(
                         status = LiveConnectionStatus.ERROR,
                         errorMessage = mappedMsg,
-                        debugAppCheckToken = debugToken,
+                        isAppCheckError = appCheckErr,
                         userAudioLevel = 0f,
                         teacherAudioLevel = 0f
                     )
@@ -467,15 +514,21 @@ class GeminiLiveTeacherManager {
     fun sendTextDuringLive(text: String) {
         val clean = text.trim()
         val session = liveSession ?: return
-        if (clean.isBlank()) return
+        if (clean.isBlank() || isSessionClosing.get() || !_state.value.isSessionActive) return
 
         appendTranscriptEntry(isStudent = true, text = clean, tag = "Yazılı Soru")
         CoroutineScope(Dispatchers.IO).launch {
+            if (isSessionClosing.get() || !_state.value.isSessionActive) return@launch
             runCatching {
                 session.send(clean)
             }.onFailure { err ->
                 Log.w(TAG, "Failed to send live text", err)
-                _state.update { it.copy(statusNotice = "Mesaj gönderilemedi: ${err.localizedMessage}") }
+                val msg = if (isChannelClosedError(err)) {
+                    "Bağlantı kesildiği için mesaj iletilemedi. 'Yeniden Bağlan' butonuna dokunun."
+                } else {
+                    "Mesaj gönderilemedi: ${err.localizedMessage}"
+                }
+                _state.update { it.copy(statusNotice = msg) }
             }
         }
     }
@@ -487,9 +540,11 @@ class GeminiLiveTeacherManager {
         transcriptSummary: String? = null
     ) {
         val session = liveSession ?: return
+        if (isSessionClosing.get() || !_state.value.isSessionActive) return
         val visibleText = transcriptSummary ?: "📎 $label: $promptText"
         appendTranscriptEntry(isStudent = true, text = visibleText, tag = "Görsel")
         CoroutineScope(Dispatchers.IO).launch {
+            if (isSessionClosing.get() || !_state.value.isSessionActive) return@launch
             runCatching {
                 val jpegBytes = compressBitmapToJpeg(bitmap)
                 session.sendVideoRealtime(InlineData(jpegBytes, "image/jpeg"))
@@ -497,7 +552,12 @@ class GeminiLiveTeacherManager {
                 _state.update { it.copy(statusNotice = "$label canlı öğretmene gösterildi.") }
             }.onFailure { err ->
                 Log.w(TAG, "Failed to send live image", err)
-                _state.update { it.copy(statusNotice = "Görsel gönderilemedi: ${err.localizedMessage}") }
+                val msg = if (isChannelClosedError(err)) {
+                    "Oturum kapandığı için görsel gönderilemedi."
+                } else {
+                    "Görsel gönderilemedi: ${err.localizedMessage}"
+                }
+                _state.update { it.copy(statusNotice = msg) }
             }
         }
     }
@@ -507,6 +567,7 @@ class GeminiLiveTeacherManager {
     }
 
     private fun stopSessionInternal(resetTranscripts: Boolean) {
+        isSessionClosing.set(true)
         timerJob?.cancel()
         timerJob = null
         sessionScopeJob?.cancel()
@@ -539,19 +600,12 @@ class GeminiLiveTeacherManager {
         }
     }
 
-    private suspend fun ensureAppCheckReady() {
-        try {
-            val result = withTimeout(APP_CHECK_TIMEOUT_MS) {
-                FirebaseAppCheck.getInstance().getAppCheckToken(false).await()
+    private suspend fun ensureAppCheckReady(context: Context?) {
+        verifyOrRefreshAppCheckToken(context = context, allowSingleForceRefresh = true)
+            .onFailure { err ->
+                if (err is CancellationException && err !is TimeoutCancellationException) throw err
+                Log.w(TAG, "Live App Check preflight diagnostic: ${err.localizedMessage}", err)
             }
-            if (result.token.isBlank()) {
-                Log.w(TAG, "App Check token was blank, proceeding anyway")
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "App Check preflight non-fatal warning: ${e.localizedMessage}, proceeding with request", e)
-        }
     }
 
     private suspend fun connectWithFallback(
@@ -560,24 +614,25 @@ class GeminiLiveTeacherManager {
         systemInstruction: com.google.firebase.ai.type.Content,
         resumeHandle: String?
     ): Pair<LiveSession, String> {
+        val realtimeInputCfg = realtimeInputConfig {
+            automaticActivityDetection = activityDetectionConfig {
+                startSensitivity = ActivityDetectionConfig.Sensitivity.LOW
+                endSensitivity = ActivityDetectionConfig.Sensitivity.LOW
+                prefixPaddingMs = 180
+                silenceDurationMs = 900
+            }
+            activityHandling = if (echoGuardEnabled) {
+                RealtimeInputConfig.ActivityHandling.NO_INTERRUPT
+            } else {
+                RealtimeInputConfig.ActivityHandling.INTERRUPT
+            }
+        }
         val config = liveGenerationConfig {
             responseModality = ResponseModality.AUDIO
             speechConfig = SpeechConfig(voice = Voice(voiceName))
             inputAudioTranscription = AudioTranscriptionConfig()
             outputAudioTranscription = AudioTranscriptionConfig()
-            realtimeInputConfig = realtimeInputConfig {
-                automaticActivityDetection = activityDetectionConfig {
-                    startSensitivity = ActivityDetectionConfig.Sensitivity.LOW
-                    endSensitivity = ActivityDetectionConfig.Sensitivity.LOW
-                    prefixPaddingMs = 180
-                    silenceDurationMs = 900
-                }
-                activityHandling = if (echoGuardEnabled) {
-                    RealtimeInputConfig.ActivityHandling.NO_INTERRUPT
-                } else {
-                    RealtimeInputConfig.ActivityHandling.INTERRUPT
-                }
-            }
+            realtimeInputConfig = realtimeInputCfg
         }
 
         val resumption = if (resumeHandle != null) {
@@ -600,7 +655,9 @@ class GeminiLiveTeacherManager {
             if (e is TimeoutCancellationException) throw e
             throw e
         } catch (primaryErr: Exception) {
-            val msg = primaryErr.message.orEmpty()
+            val msg = generateSequence(primaryErr as Throwable) { it.cause }
+                .mapNotNull { it.message ?: it.localizedMessage }
+                .joinToString(" | ")
             val isAuthOrAppCheck = isAppCheckErrorMessage(msg) ||
                 msg.contains("PERMISSION_DENIED", ignoreCase = true)
             val shouldFallback = !isAuthOrAppCheck && (
@@ -608,14 +665,28 @@ class GeminiLiveTeacherManager {
                     msg.contains("unsupported", ignoreCase = true) ||
                     msg.contains("model", ignoreCase = true) ||
                     msg.contains("404", ignoreCase = true) ||
-                    msg.contains("invalid", ignoreCase = true)
+                    msg.contains("invalid", ignoreCase = true) ||
+                    msg.contains("channel was closed", ignoreCase = true) ||
+                    msg.contains("closed", ignoreCase = true) ||
+                    msg.contains("1008", ignoreCase = true) ||
+                    msg.contains("1006", ignoreCase = true) ||
+                    msg.contains("voice", ignoreCase = true)
                 )
             if (!shouldFallback) throw primaryErr
 
-            Log.w(TAG, "Primary Live model unavailable, trying fallback model", primaryErr)
+            Log.w(TAG, "Primary Live model unavailable or closed handshake, trying fallback model", primaryErr)
+            val fallbackConfig = if (voiceName != "AOEDE" && msg.contains("voice", ignoreCase = true)) {
+                liveGenerationConfig {
+                    responseModality = ResponseModality.AUDIO
+                    speechConfig = SpeechConfig(voice = Voice("AOEDE"))
+                    inputAudioTranscription = AudioTranscriptionConfig()
+                    outputAudioTranscription = AudioTranscriptionConfig()
+                    realtimeInputConfig = realtimeInputCfg
+                }
+            } else config
             val fallbackModel = Firebase.ai(backend = GenerativeBackend.googleAI()).liveModel(
                 modelName = LiveLessonUiState.FALLBACK_LIVE_MODEL,
-                generationConfig = config,
+                generationConfig = fallbackConfig,
                 systemInstruction = systemInstruction
             )
             val session = withTimeout(CONNECT_TIMEOUT_MS) {
@@ -907,22 +978,31 @@ class GeminiLiveTeacherManager {
                     _state.update { it.copy(userAudioLevel = visibleLevel) }
                 }
 
-                if (isGateOpen) {
+                if (isGateOpen && !isSessionClosing.get()) {
                     // Flush ~200ms pre-roll first so opening syllables aren't clipped
-                    while (preRollQueue.isNotEmpty()) {
+                    var channelClosed = false
+                    while (preRollQueue.isNotEmpty() && !channelClosed) {
                         val pre = preRollQueue.removeFirst()
                         runCatching {
                             session.sendAudioRealtime(InlineData(pre, "audio/pcm"))
                         }.onFailure { err ->
                             if (err is CancellationException) throw err
-                            Log.w(TAG, "sendAudioRealtime pre-roll error", err)
+                            if (isChannelClosedError(err)) {
+                                channelClosed = true
+                            } else {
+                                Log.w(TAG, "sendAudioRealtime pre-roll error", err)
+                            }
                         }
                     }
-                    runCatching {
-                        session.sendAudioRealtime(InlineData(payload, "audio/pcm"))
-                    }.onFailure { err ->
-                        if (err is CancellationException) throw err
-                        Log.w(TAG, "sendAudioRealtime error", err)
+                    if (!channelClosed) {
+                        runCatching {
+                            session.sendAudioRealtime(InlineData(payload, "audio/pcm"))
+                        }.onFailure { err ->
+                            if (err is CancellationException) throw err
+                            if (!isChannelClosedError(err)) {
+                                Log.w(TAG, "sendAudioRealtime error", err)
+                            }
+                        }
                     }
                 } else {
                     if (preRollQueue.size >= 2) {
@@ -1328,6 +1408,19 @@ class GeminiLiveTeacherManager {
         return (rms * 4.5f).coerceIn(0f, 1f)
     }
 
+    private fun isChannelClosedError(error: Throwable): Boolean {
+        val chain = generateSequence(error) { it.cause }
+            .mapNotNull { "${it::class.simpleName}:${it.message ?: it.localizedMessage}" }
+            .joinToString(" | ")
+        return chain.contains("channel was closed", ignoreCase = true) ||
+            chain.contains("closed by the server", ignoreCase = true) ||
+            chain.contains("ClosedReceiveChannel", ignoreCase = true) ||
+            chain.contains("ClosedSendChannel", ignoreCase = true) ||
+            chain.contains("1008", ignoreCase = true) ||
+            chain.contains("1006", ignoreCase = true) ||
+            chain.contains("EOF", ignoreCase = true)
+    }
+
     private fun mapLiveErrorMessage(error: Throwable): String {
         if (error is TimeoutCancellationException) {
             return "Canlı ders bağlantısı zaman aşımına uğradı. İnternetinizi kontrol edip tekrar deneyin."
@@ -1338,7 +1431,10 @@ class GeminiLiveTeacherManager {
         return when {
             isAppCheckErrorMessage(chain) ||
                 chain.contains("PERMISSION_DENIED", ignoreCase = true) -> {
-                "Firebase App Check doğrulaması reddedildi (403). Bu cihazdaki Debug Token henüz Firebase Console'a kayıtlı değil. Aşağıdan token'ı kopyalayıp Firebase Console > App Check > Manage debug tokens bölümüne ekleyerek Canlı Ders ve Normal Modu hemen açabilirsiniz."
+                formatAppCheckUserError(error, appContext)
+            }
+            isChannelClosedError(error) -> {
+                "Canlı ders kanalı sunucu tarafından geçici olarak kapatıldı (bağlantı zaman aşımı veya oturum sınırına ulaşıldı). 'Yeniden Bağlan' ile kaldığın yerden devam edebilirsin."
             }
             error is IOException ||
                 chain.contains("network", ignoreCase = true) ||

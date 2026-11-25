@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg_card"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/quick_note_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Hızlı Ders Notu"
+        android:textColor="#C084FC"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/quick_note_body"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_weight="1"
+        android:text="Yeni ders notu eklemek veya okumak için dokun."
+        android:textColor="#E2E8F0"
+        android:textSize="12sp"
+        android:maxLines="3" />
+
+    <Button
+        android:id="@+id/btn_open_notes"
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/widget_pill_btn"
+        android:text="Not Ekle / Düzenle"
+        android:textAllCaps="false"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp" />
+</LinearLayout>

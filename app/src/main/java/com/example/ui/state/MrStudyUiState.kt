@@ -3,17 +3,22 @@ package com.example.ui.state
 import android.graphics.Bitmap
 import android.net.Uri
 import com.example.data.local.LocalParentMetrics
+import com.example.data.local.MrStudy4LocalState
+import com.example.data.model.AiToolType
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatSession
 import com.example.data.model.DailyLearningTask
+import com.example.data.model.DiagramProject
 import com.example.data.model.ExamRecord
 import com.example.data.model.ExamResultSummary
 import com.example.data.model.ExplanationDepth
 import com.example.data.model.FlashcardItem
 import com.example.data.model.Game3dQuestion
 import com.example.data.model.GeneratedExam
+import com.example.data.model.MathSolutionResult
 import com.example.data.model.MiniQuizQuestion
 import com.example.data.model.PdfResourceRecord
+import com.example.data.model.PresentationDeck
 import com.example.data.model.SmartBoardPayload
 import com.example.data.model.StudentProfile
 import com.example.data.model.StudyNote
@@ -56,7 +61,7 @@ data class MrStudyUiState(
     val isTeacherStreaming: Boolean = false,
     val streamingReply: String = "",
     val teacherError: String? = null,
-    val teacherAppCheckToken: String? = null,
+    val isTeacherAppCheckError: Boolean = false,
 
     // PDF Studio
     val pdfSources: List<PdfResourceRecord> = emptyList(),
@@ -89,7 +94,7 @@ data class MrStudyUiState(
     val miniQuizQuestions: List<MiniQuizQuestion> = emptyList(),
     val isLoadingMiniQuiz: Boolean = false,
 
-    // MrStudy 3.0: Live Smart Board, Mid-Lesson Quiz, 3D Game, Worksheet & Parent Panel
+    // MrStudy 3.0 & 4.0 Studios
     val smartBoardState: SmartBoardPayload? = null,
     val isGeneratingSmartBoard: Boolean = false,
     val midLessonQuestion: MiniQuizQuestion? = null,
@@ -100,6 +105,23 @@ data class MrStudyUiState(
     val isLoadingGame3d: Boolean = false,
     val isExportingWorksheet: Boolean = false,
     val parentMetrics: LocalParentMetrics = LocalParentMetrics(),
+
+    // MrStudy 4.0 Extended State
+    val studioState: MrStudy4LocalState = MrStudy4LocalState(),
+    val activeDiagram: DiagramProject? = null,
+    val isGeneratingDiagram: Boolean = false,
+    val diagramNodeExplanation: String? = null,
+    val isExplainingDiagramNode: Boolean = false,
+    val isGeneratingCustomGame: Boolean = false,
+    val activeToolType: AiToolType = AiToolType.MATH_SOLVER,
+    val activeToolResult: String? = null,
+    val isRunningAiTool: Boolean = false,
+    val mathSolutionResult: MathSolutionResult? = null,
+    val isSolvingMath: Boolean = false,
+    val activePresentation: PresentationDeck? = null,
+    val isGeneratingPresentation: Boolean = false,
+    val codeAiOutput: String? = null,
+    val isAnalyzingCode: Boolean = false,
 
     // Global banner/feedback
     val statusBanner: String? = null

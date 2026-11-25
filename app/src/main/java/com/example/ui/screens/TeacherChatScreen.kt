@@ -98,6 +98,7 @@ import com.example.data.model.TeachingMode
 import com.example.ui.components.GlassCard
 import com.example.ui.components.MrStudy3Backdrop
 import com.example.ui.components.MrStudyRobotAvatar
+import com.example.ui.components.RichMarkdownText
 import com.example.ui.components.pressableScale
 import com.example.ui.state.MrStudyUiState
 import com.example.ui.theme.CyberCyanTertiary
@@ -381,11 +382,9 @@ fun TeacherChatScreen(
                             }
                         }
 
-                        val debugToken = state.teacherAppCheckToken
-                        if (!debugToken.isNullOrBlank()) {
-                            AppCheckTokenQuickCard(
-                                debugToken = debugToken,
-                                onOpenSetupDialog = onOpenAppCheckSetup
+                        if (state.isTeacherAppCheckError) {
+                            AppCheckStatusQuickCard(
+                                onOpenStatusDialog = onOpenAppCheckSetup
                             )
                         }
                     }
@@ -451,7 +450,15 @@ fun TeacherChatScreen(
                 }
             }
 
-            // Quick Pedagogical Prompts
+            // Quick Pedagogical Prompts & Weak-Topic Recommendations
+            val weakTopics = remember(state.examHistory) {
+                state.examHistory
+                    .flatMap { it.weakTopics }
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .take(3)
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -460,15 +467,22 @@ fun TeacherChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 listOf(
-                    "Günlük hayattan örnek ver",
-                    "Farklı bir örnekle tekrar açıkla",
-                    "Öğrenme kontrolü sorusu sor",
-                    "Bana seviyeme uygun ödev ver"
-                ).forEach { prompt ->
+                    "Pratik Soru" to "Bu konuyla ilgili seviyeme uygun 3 pratik soru sor.",
+                    "Özet Çıkar" to "Şu ana kadar anlattığımız konunun kısa madde madde özetini çıkar.",
+                    "Farklı Yolla Anlat" to "Bu konuyu günlük hayattan farklı bir örnek ve benzetmeyle tekrar anlat.",
+                    "Görsel & Sesli Anlatım" to "Bu konuyu görsel canlandırmalar ve adım adım sesli anlatım kurgusuyla açıkla."
+                ).forEach { (label, prompt) ->
                     AssistChip(
                         onClick = { onSendMessage(prompt, bindActivePdf) },
                         enabled = !state.isTeacherStreaming,
-                        label = { Text(prompt, style = MaterialTheme.typography.labelSmall) }
+                        label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+                weakTopics.forEach { weak ->
+                    AssistChip(
+                        onClick = { onSendMessage("Sınavlarda zorlandığım '$weak' konusunu temelden anlat ve 2 alıştırma ver.", bindActivePdf) },
+                        enabled = !state.isTeacherStreaming,
+                        label = { Text("Zayıf Konu: $weak", style = MaterialTheme.typography.labelSmall, color = CyberCyanTertiary) }
                     )
                 }
             }
@@ -772,9 +786,8 @@ private fun ChatBubble(
                         )
                     }
                 } else {
-                    Text(
+                    RichMarkdownText(
                         text = message.content,
-                        style = MaterialTheme.typography.bodyMedium,
                         color = Color.White
                     )
                 }

@@ -584,30 +584,77 @@ class MrStudyRepository(private val db: FirebaseFirestore) {
     }
 
     suspend fun updateFlashcardReview(userId: String, card: FlashcardItem, learned: Boolean) {
+        updateFlashcardTieredReview(
+            userId = userId,
+            card = card,
+            status = if (learned) "learned" else "review",
+            intervalDays = if (learned) null else 0L
+        )
+    }
+
+    suspend fun updateFlashcardTieredReview(
+        userId: String,
+        card: FlashcardItem,
+        status: String,
+        intervalDays: Long? = null
+    ) {
         require(card.id.isNotBlank())
         val docRef = userDoc(userId).collection("flashcards").document(card.id)
+        val safeStatus = when (status) {
+            "new", "review", "learned" -> status
+            else -> "review"
+        }
         val newCount = (card.reviewCount + 1L).coerceAtMost(1000L)
-        val intervalMs = if (learned) {
-            // Spaced repetition interval: 1d, 3d, 7d, 14d...
-            val days = when (newCount.toInt()) {
-                1 -> 1L
-                2 -> 3L
-                3 -> 7L
-                else -> 14L
+        val nextReviewMs = when {
+            intervalDays != null && intervalDays > 0L ->
+                System.currentTimeMillis() + intervalDays * 24L * 60L * 60L * 1000L
+            safeStatus == "learned" -> {
+                val days = when (newCount.toInt()) {
+                    1 -> 1L
+                    2 -> 3L
+                    3 -> 7L
+                    else -> 14L
+                }
+                System.currentTimeMillis() + days * 24L * 60L * 60L * 1000L
             }
-            System.currentTimeMillis() + days * 24L * 60L * 60L * 1000L
-        } else {
-            // Needs review soon (10 minutes)
-            System.currentTimeMillis() + 10L * 60L * 1000L
+            safeStatus == "new" -> System.currentTimeMillis() + 3L * 60L * 1000L
+            else -> System.currentTimeMillis() + 12L * 60L * 60L * 1000L
         }
         val payload = mapOf(
-            "subject" to card.subject.take(60),
-            "cardType" to card.cardType.take(40),
-            "front" to card.front.take(1000),
-            "back" to card.back.take(2000),
-            "masteryStatus" to if (learned) "learned" else "review",
+            "subject" to card.subject.ifBlank { "Genel" }.take(60),
+            "cardType" to card.cardType.ifBlank { "Kavram" }.take(40),
+            "front" to card.front.trim().ifBlank { "Soru" }.take(1000),
+            "back" to card.back.trim().ifBlank { "Cevap" }.take(2000),
+            "masteryStatus" to safeStatus,
             "reviewCount" to newCount,
-            "nextReviewAtMs" to intervalMs,
+            "nextReviewAtMs" to nextReviewMs,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        try {
+            docRef.update(payload).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            throw e
+        }
+    }
+
+    suspend fun updateFlashcardFull(userId: String, card: FlashcardItem) {
+        require(card.id.isNotBlank())
+        val docRef = userDoc(userId).collection("flashcards").document(card.id)
+        val safeStatus = when (card.masteryStatus) {
+            "new", "review", "learned" -> card.masteryStatus
+            else -> "new"
+        }
+        val payload = mapOf(
+            "subject" to card.subject.ifBlank { "Genel" }.take(60),
+            "cardType" to card.cardType.ifBlank { "Kavram" }.take(40),
+            "front" to card.front.trim().ifBlank { "Soru" }.take(1000),
+            "back" to card.back.trim().ifBlank { "Cevap" }.take(2000),
+            "masteryStatus" to safeStatus,
+            "reviewCount" to card.reviewCount.coerceIn(0L, 1000L),
+            "nextReviewAtMs" to card.nextReviewAtMs.coerceAtLeast(0L),
             "updatedAt" to FieldValue.serverTimestamp()
         )
         try {

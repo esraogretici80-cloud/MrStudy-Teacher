@@ -7,7 +7,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.friendlyFirestoreErrorMessage
-import com.example.core.getLocalAppCheckDebugToken
+import com.example.core.formatAppCheckUserError
 import com.example.core.isAppCheckErrorMessage
 import com.example.data.ai.GeminiLiveTeacherManager
 import com.example.data.ai.LiveLessonUiState
@@ -15,14 +15,25 @@ import com.example.data.ai.LivePdfCommand
 import com.example.data.ai.LivePdfCommandParser
 import com.example.data.ai.MrStudyAiService
 import com.example.data.local.LocalStudyMetricsStore
+import com.example.data.local.MrStudy4LocalStore
+import com.example.data.model.AiToolType
 import com.example.data.model.ChatSession
+import com.example.data.model.CodeProjectFile
+import com.example.data.model.CodingLanguage
+import com.example.data.model.Custom3dGameConfig
 import com.example.data.model.DailyLearningTask
+import com.example.data.model.DiagramProject
+import com.example.data.model.DiagramType
 import com.example.data.model.ExamDifficulty
 import com.example.data.model.ExamRecord
 import com.example.data.model.ExplanationDepth
 import com.example.data.model.FlashcardItem
+import com.example.data.model.FlashcardReviewRating
+import com.example.data.model.GameGenre
 import com.example.data.model.PdfResourceRecord
+import com.example.data.model.PresentationDeck
 import com.example.data.model.QuestionType
+import com.example.data.model.SavedMathBoard
 import com.example.data.model.StudentProfile
 import com.example.data.model.StudyNote
 import com.example.data.model.StudyPlanItem
@@ -52,7 +63,9 @@ class MrStudyViewModel(
     private val currentUserId: String,
     private val initialDisplayName: String,
     private val initialEmail: String,
-    private val metricsStore: LocalStudyMetricsStore? = null
+    private val metricsStore: LocalStudyMetricsStore? = null,
+    private val studioStore: MrStudy4LocalStore? = null,
+    private val appContext: Context? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MrStudyUiState())
@@ -60,6 +73,17 @@ class MrStudyViewModel(
 
     private val liveManager = GeminiLiveTeacherManager()
     val liveState: StateFlow<LiveLessonUiState> = liveManager.state
+
+    val studioController = MrStudy4ViewModelController(
+        scope = viewModelScope,
+        uiState = _uiState,
+        repository = repository,
+        aiService = aiService,
+        currentUserId = currentUserId,
+        studioStore = studioStore,
+        metricsStore = metricsStore,
+        onSyncWidgets = { syncWidgetsIfPossible() }
+    )
 
     private var messagesJob: Job? = null
     private var examTimerJob: Job? = null
@@ -71,6 +95,7 @@ class MrStudyViewModel(
     init {
         initializeUserData()
         observeLocalParentMetrics()
+        observeStudioState()
     }
 
     private fun observeLocalParentMetrics() {
@@ -80,6 +105,34 @@ class MrStudyViewModel(
                 _uiState.update { it.copy(parentMetrics = local) }
             }
         }
+    }
+
+    private fun observeStudioState() {
+        val store = studioStore ?: return
+        viewModelScope.launch {
+            store.state.collectLatest { st ->
+                _uiState.update { it.copy(studioState = st) }
+                syncWidgetsIfPossible()
+            }
+        }
+    }
+
+    private fun syncWidgetsIfPossible() {
+        val ctx = appContext ?: return
+        val pendingMins = com.example.widget.MrStudyWidgetStore(ctx).consumePendingStopwatchMinutes()
+        if (pendingMins > 0 && _uiState.value.isProfileLoaded) {
+            viewModelScope.launch {
+                runCatching {
+                    repository.awardProgress(
+                        userId = currentUserId,
+                        currentProfile = _uiState.value.profile,
+                        xpDelta = pendingMins * 3L,
+                        minutesDelta = pendingMins.toLong()
+                    )
+                }
+            }
+        }
+        com.example.widget.MrStudyWidgetUpdater.syncFromUiState(ctx, _uiState.value)
     }
 
     private fun initializeUserData() {
@@ -122,6 +175,7 @@ class MrStudyViewModel(
                                 selectedMode = TeachingMode.fromTitle(profile.preferredMode)
                             )
                         }
+                        syncWidgetsIfPossible()
                     }
                 }
         }
@@ -166,6 +220,7 @@ class MrStudyViewModel(
                 .catch { handleStreamError("study_plans", it) }
                 .collectLatest { plans ->
                     _uiState.update { it.copy(studyPlans = plans) }
+                    syncWidgetsIfPossible()
                 }
         }
 
@@ -174,6 +229,7 @@ class MrStudyViewModel(
                 .catch { handleStreamError("notes", it) }
                 .collectLatest { notes ->
                     _uiState.update { it.copy(notes = notes) }
+                    syncWidgetsIfPossible()
                 }
         }
 
@@ -182,6 +238,7 @@ class MrStudyViewModel(
                 .catch { handleStreamError("flashcards", it) }
                 .collectLatest { cards ->
                     _uiState.update { it.copy(flashcards = cards) }
+                    syncWidgetsIfPossible()
                 }
         }
 
@@ -219,7 +276,7 @@ class MrStudyViewModel(
             it.copy(
                 statusBanner = null,
                 teacherError = null,
-                teacherAppCheckToken = null,
+                isTeacherAppCheckError = false,
                 pdfError = null,
                 examError = null
             )
@@ -227,7 +284,7 @@ class MrStudyViewModel(
     }
 
     fun dismissTeacherError() {
-        _uiState.update { it.copy(teacherError = null, teacherAppCheckToken = null) }
+        _uiState.update { it.copy(teacherError = null, isTeacherAppCheckError = false) }
     }
 
     fun setOnboardingVisible(visible: Boolean) {
@@ -441,7 +498,7 @@ class MrStudyViewModel(
                     isTeacherStreaming = true,
                     streamingReply = "",
                     teacherError = null,
-                    teacherAppCheckToken = null,
+                    isTeacherAppCheckError = false,
                     attachedImages = emptyList()
                 )
             }
@@ -551,16 +608,13 @@ class MrStudyViewModel(
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed sending message", e)
-                val msg = e.localizedMessage ?: "Öğretmen yanıtı alınamadı."
-                val debugToken = if (isAppCheckErrorMessage(msg)) {
-                    getLocalAppCheckDebugToken(appContext)
-                } else {
-                    null
-                }
+                val rawMsg = e.localizedMessage ?: "Öğretmen yanıtı alınamadı."
+                val isAppCheckErr = isAppCheckErrorMessage(rawMsg)
+                val friendlyMsg = if (isAppCheckErr) formatAppCheckUserError(e, appContext) else rawMsg
                 _uiState.update {
                     it.copy(
-                        teacherError = msg,
-                        teacherAppCheckToken = debugToken
+                        teacherError = friendlyMsg,
+                        isTeacherAppCheckError = isAppCheckErr
                     )
                 }
             } finally {

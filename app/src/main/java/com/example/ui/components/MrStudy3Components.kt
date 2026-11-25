@@ -285,7 +285,7 @@ fun MrStudyLogoHeader(
                 ) {
                     Icon(
                         imageVector = Icons.Default.School,
-                        contentDescription = "MrStudy 3.0",
+                        contentDescription = "MrStudy 4.0",
                         tint = CyberCyanTertiary,
                         modifier = Modifier.size(23.dp)
                     )
@@ -305,12 +305,15 @@ fun MrStudyLogoHeader(
                         maxLines = 1
                     )
                     Surface(
-                        color = ElectricBlueSecondary.copy(alpha = 0.22f),
+                        color = ElectricBlueSecondary.copy(alpha = 0.25f),
                         shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, CyberCyanTertiary.copy(alpha = 0.65f))
+                        border = BorderStroke(
+                            1.dp,
+                            Brush.linearGradient(listOf(NeonPurplePrimary, CyberCyanTertiary))
+                        )
                     ) {
                         Text(
-                            text = "3.0",
+                            text = "4.0",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.ExtraBold,
                             color = CyberCyanTertiary,
@@ -319,7 +322,7 @@ fun MrStudyLogoHeader(
                     }
                 }
                 Text(
-                    text = "Geleceğin Yapay Zekâ Akademisi",
+                    text = "Daha Akıllı, Daha Güçlü Eğitim",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

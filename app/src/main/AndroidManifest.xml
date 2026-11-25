@@ -34,6 +34,143 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name="com.example.widget.MrStudyWidgetConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.MyApplication">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name="com.example.widget.AiTeacherWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_ai_teacher_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_ai_teacher_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.DailyGoalWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_daily_goal_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_daily_goal_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.FlashcardWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_flashcard_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.widget.ACTION_FLASHCARD_FLIP" />
+                <action android:name="com.example.widget.ACTION_FLASHCARD_NEXT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_flashcard_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.ScheduleWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_schedule_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_schedule_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.XpStreakWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_xp_streak_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_xp_streak_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.ExamCountdownWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_exam_countdown_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_exam_countdown_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.StudyStopwatchWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_stopwatch_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.widget.ACTION_STOPWATCH_START" />
+                <action android:name="com.example.widget.ACTION_STOPWATCH_PAUSE" />
+                <action android:name="com.example.widget.ACTION_STOPWATCH_FINISH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_study_stopwatch_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.QuickNoteWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_quick_note_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quick_note_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.DailyQuestionWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_daily_question_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.widget.ACTION_DAILY_QUESTION_ANSWER" />
+                <action android:name="com.example.widget.ACTION_DAILY_QUESTION_NEXT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_daily_question_info" />
+        </receiver>
+
+        <receiver
+            android:name="com.example.widget.MotivationWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_motivation_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.widget.ACTION_MOTIVATION_NEXT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_motivation_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

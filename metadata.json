@@ -1,6 +1,6 @@
 {
-  "name": "MrStudy",
-  "description": "Öğrenciler için kişiselleştirilmiş Türkçe AI öğretmen, PDF ve görsel analiz, akıllı sınav ve çalışma planı eğitim platformu.",
+  "name": "MrStudy 4.0",
+  "description": "MrStudy 4.0 — Daha Akıllı, Daha Güçlü Eğitim: AI Öğretmen 2.0, Canlı Ders, 3B Bilim Laboratuvarı, 3B Oyun ve Diyagram Stüdyosu, Flash Kartlar, Kodlama ve Matematik Tahtası, PDF Stüdyo 2.0 ve Android Widget platformu.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

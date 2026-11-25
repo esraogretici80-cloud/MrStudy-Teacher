@@ -91,19 +91,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import com.example.data.model.PdfResourceRecord
 import com.example.data.model.SubjectCatalog
 import com.example.data.model.TeachingMode
+import com.example.ui.components.DefaultMarkupColors
 import com.example.ui.components.GlassCard
 import com.example.ui.components.MrStudy3Backdrop
 import com.example.ui.components.NeonGradientButton
+import com.example.ui.components.PdfMarkupOverlay
+import com.example.ui.components.PdfMarkupStroke
+import com.example.ui.components.PdfMarkupTool
+import com.example.ui.components.PdfMarkupToolbar
+import com.example.ui.components.RichMarkdownText
 import com.example.ui.components.SubScreenTopBar
+import com.example.ui.components.exportAnnotatedPdfBitmap
 import com.example.ui.state.MrStudyUiState
 import com.example.ui.theme.CyberCyanTertiary
 import com.example.ui.theme.ElectricBlueSecondary
 import com.example.ui.theme.NeonPurplePrimary
 import com.example.ui.theme.SuccessGreen
 import com.example.util.PdfHelper
+import kotlinx.coroutines.launch
 
 private enum class PdfSortOption(val label: String) {
     RECENT("En Yeni"),
@@ -139,6 +150,14 @@ fun PdfStudioScreen(
     var deletingPdf by remember { mutableStateOf<PdfResourceRecord?>(null) }
     var pendingRelinkPdf by remember { mutableStateOf<PdfResourceRecord?>(null) }
     var showJumpPageDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isMarkupEnabled by remember { mutableStateOf(false) }
+    var currentMarkupTool by remember { mutableStateOf(PdfMarkupTool.HIGHLIGHTER) }
+    var selectedMarkupColor by remember { mutableStateOf(DefaultMarkupColors[0].first) }
+    var isSharingAnnotated by remember { mutableStateOf(false) }
+    val pageStrokesMap = remember { mutableStateMapOf<String, List<PdfMarkupStroke>>() }
 
     val activePdf = state.activePdf
 
@@ -482,6 +501,56 @@ fun PdfStudioScreen(
                                             }
                                         }
                                     } else {
+                                        val pageKey = "${activePdf.id}_${state.activePdfPage}"
+                                        val currentStrokes = pageStrokesMap[pageKey] ?: emptyList()
+
+                                        PdfMarkupToolbar(
+                                            isMarkupEnabled = isMarkupEnabled,
+                                            onToggleMarkup = { isMarkupEnabled = !isMarkupEnabled },
+                                            strokeCount = currentStrokes.size,
+                                            currentTool = currentMarkupTool,
+                                            onSelectTool = { currentMarkupTool = it },
+                                            selectedColor = selectedMarkupColor,
+                                            onSelectColor = { selectedMarkupColor = it },
+                                            canUndo = currentStrokes.isNotEmpty(),
+                                            onUndo = {
+                                                if (currentStrokes.isNotEmpty()) {
+                                                    pageStrokesMap[pageKey] = currentStrokes.dropLast(1)
+                                                }
+                                            },
+                                            onClear = {
+                                                pageStrokesMap[pageKey] = emptyList()
+                                            },
+                                            onShareAnnotated = {
+                                                val pageBmp = state.renderedPdfPage
+                                                if (pageBmp != null) {
+                                                    scope.launch {
+                                                        isSharingAnnotated = true
+                                                        try {
+                                                            val file = exportAnnotatedPdfBitmap(
+                                                                context = context,
+                                                                baseBitmap = pageBmp,
+                                                                strokes = currentStrokes,
+                                                                pageNumber = state.activePdfPage,
+                                                                pdfTitle = activePdf.title
+                                                            )
+                                                            PdfHelper.shareFile(
+                                                                context = context,
+                                                                file = file,
+                                                                mimeType = "image/png",
+                                                                chooserTitle = "İşaretli PDF Sayfasını Paylaş (${activePdf.title} - s.${state.activePdfPage})"
+                                                            )
+                                                        } catch (e: Exception) {
+                                                            android.widget.Toast.makeText(context, "Dışa aktarma hatası: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                                        } finally {
+                                                            isSharingAnnotated = false
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            isSharing = isSharingAnnotated
+                                        )
+
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -497,6 +566,16 @@ fun PdfStudioScreen(
                                                     contentDescription = "PDF Sayfa ${state.activePdfPage}",
                                                     modifier = Modifier.fillMaxSize(),
                                                     contentScale = ContentScale.Fit
+                                                )
+                                                PdfMarkupOverlay(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    strokes = currentStrokes,
+                                                    isMarkupEnabled = isMarkupEnabled,
+                                                    currentTool = currentMarkupTool,
+                                                    selectedColor = selectedMarkupColor,
+                                                    onStrokesChanged = { updatedList ->
+                                                        pageStrokesMap[pageKey] = updatedList
+                                                    }
                                                 )
                                             } else {
                                                 Text("Sayfa yükleniyor...", color = Color.DarkGray)
@@ -640,7 +719,7 @@ fun PdfStudioScreen(
                                         ) {
                                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 Text("PDF Özeti (Kaynak İçi)", style = MaterialTheme.typography.titleSmall, color = CyberCyanTertiary)
-                                                Text(activePdf.summary, style = MaterialTheme.typography.bodySmall)
+                                                RichMarkdownText(markdown = activePdf.summary, color = Color.White)
                                                 if (activePdf.topics.isNotEmpty()) {
                                                     FlowRow(
                                                         horizontalArrangement = Arrangement.spacedBy(6.dp),

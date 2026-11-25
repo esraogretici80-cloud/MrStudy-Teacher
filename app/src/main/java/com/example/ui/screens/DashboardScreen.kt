@@ -48,7 +48,21 @@ import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.LocalLibrary
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Style
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -56,9 +70,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -108,12 +127,25 @@ fun DashboardScreen(
     onOpenExamCenter: () -> Unit,
     onOpenStudyHub: () -> Unit,
     onOpen3dGame: () -> Unit = {},
+    onOpenFlashcards: () -> Unit = {},
+    onOpenGameStudio: () -> Unit = {},
+    onOpenDiagramBoard: () -> Unit = {},
+    onOpenScienceLab: () -> Unit = {},
+    onOpenAiTools: () -> Unit = {},
+    onOpenCodingStudio: () -> Unit = {},
+    onOpenMathBoard: () -> Unit = {},
+    onOpenAudioStudio: () -> Unit = {},
+    onOpenDigitalLibrary: () -> Unit = {},
+    onToggleLowPower3d: (Boolean) -> Unit = {},
+    onMarkAllNotificationsRead: () -> Unit = {},
+    onSetExamCountdown: (String, Long) -> Unit = { _, _ -> },
     onSwitchGradeMode: (String) -> Unit = {},
     onToggleDailyTask: (DailyLearningTask) -> Unit,
     onLoadMiniQuiz: (String) -> Unit,
     onMiniQuizCompleted: (Int) -> Unit,
     onOpenProfile: () -> Unit,
-    onToggleTheme: (String) -> Unit
+    onToggleTheme: (String) -> Unit,
+    onOpenAppCheckSetup: () -> Unit = {}
 ) {
     val profile = state.profile
     val completedPlans = state.studyPlans.count { it.isCompleted }
@@ -128,6 +160,17 @@ fun DashboardScreen(
     }
     val bestSubject = subjectAverages.maxByOrNull { it.value }
     val weakSubject = subjectAverages.minByOrNull { it.value }
+
+    var showNotificationsDialog by remember { mutableStateOf(false) }
+    var showCountdownDialog by remember { mutableStateOf(false) }
+    var robotTiltX by remember { mutableFloatStateOf(0f) }
+    var robotTiltY by remember { mutableFloatStateOf(0f) }
+    val unreadNotifCount = remember(state.studioState.notifications) {
+        state.studioState.notifications.count { !it.isRead }
+    }
+    val daysToExam = remember(state.studioState.examTargetEpochMs) {
+        ((state.studioState.examTargetEpochMs - System.currentTimeMillis()) / 86_400_000L).coerceAtLeast(0L)
+    }
 
     MrStudy3Backdrop {
         LazyColumn(
@@ -151,13 +194,13 @@ fun DashboardScreen(
                     ) {
                         Box(modifier = Modifier.fillMaxWidth()) {
                             Image(
-                                painter = painterResource(id = R.drawable.img_hero_academy),
+                                painter = painterResource(id = R.drawable.img_mrstudy4_hero),
                                 contentDescription = null,
                                 modifier = Modifier
                                     .matchParentSize()
                                     .clip(RoundedCornerShape(24.dp)),
                                 contentScale = ContentScale.Crop,
-                                alpha = 0.16f
+                                alpha = 0.24f
                             )
 
                             Column(
@@ -176,7 +219,38 @@ fun DashboardScreen(
                                         modifier = Modifier.weight(1f),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Box(contentAlignment = Alignment.TopStart) {
+                                        var robotClickCount by remember { mutableIntStateOf(0) }
+                                        Box(
+                                            contentAlignment = Alignment.TopStart,
+                                            modifier = Modifier
+                                                .pointerInput(Unit) {
+                                                    detectDragGestures(
+                                                        onDrag = { change, drag ->
+                                                            change.consume()
+                                                            robotTiltY = (robotTiltY + drag.x * 0.25f).coerceIn(-18f, 18f)
+                                                            robotTiltX = (robotTiltX - drag.y * 0.25f).coerceIn(-18f, 18f)
+                                                        },
+                                                        onDragEnd = {
+                                                            robotTiltX = 0f
+                                                            robotTiltY = 0f
+                                                        }
+                                                    )
+                                                }
+                                                .clickable {
+                                                    robotClickCount++
+                                                    if (robotClickCount >= 3) {
+                                                        robotClickCount = 0
+                                                        onOpenAppCheckSetup()
+                                                    } else {
+                                                        robotTiltY = if (robotTiltY == 0f) 14f else 0f
+                                                    }
+                                                }
+                                                .graphicsLayer {
+                                                    rotationX = robotTiltX
+                                                    rotationY = robotTiltY
+                                                    cameraDistance = 12 * density
+                                                }
+                                        ) {
                                             MrStudyRobotAvatar(
                                                 status = LiveConnectionStatus.IDLE,
                                                 teacherAudioLevel = 0f,
@@ -241,7 +315,7 @@ fun DashboardScreen(
                                         }
                                     }
 
-                                    // Capsule Theme + Profile Action Group (matching Görsel 1)
+                                    // Capsule Notifications + Theme + Profile Action Group
                                     Surface(
                                         shape = RoundedCornerShape(16.dp),
                                         color = Color(0xFF10192E).copy(alpha = 0.88f),
@@ -251,6 +325,31 @@ fun DashboardScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.height(42.dp)
                                         ) {
+                                            IconButton(
+                                                onClick = { showNotificationsDialog = true },
+                                                modifier = Modifier
+                                                    .size(42.dp)
+                                                    .testTag("notifications_button")
+                                            ) {
+                                                BadgedBox(
+                                                    badge = {
+                                                        if (unreadNotifCount > 0) {
+                                                            Badge { Text("$unreadNotifCount") }
+                                                        }
+                                                    }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Notifications,
+                                                        contentDescription = "Bildirimler",
+                                                        tint = GoldStreakAccent,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                            VerticalDivider(
+                                                modifier = Modifier.height(22.dp),
+                                                color = Color.White.copy(alpha = 0.16f)
+                                            )
                                             IconButton(
                                                 onClick = {
                                                     val next = if (profile.darkThemeMode == "light") "dark" else "light"
@@ -288,30 +387,65 @@ fun DashboardScreen(
                                     }
                                 }
 
-                                // Golden Streak Pill
+                                // Exam Countdown + Low Power 3D + Golden Streak Pills
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = ElectricBlueSecondary.copy(alpha = 0.18f),
+                                        border = BorderStroke(1.dp, ElectricBlueSecondary.copy(alpha = 0.55f)),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .clickable { showCountdownDialog = true }
+                                    ) {
+                                        Text(
+                                            text = "⏳ ${state.studioState.examCountdownLabel}: $daysToExam gün",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = CyberCyanTertiary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = if (state.studioState.lowPower3dMode) SuccessGreen.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
+                                        border = BorderStroke(1.dp, if (state.studioState.lowPower3dMode) SuccessGreen else Color.White.copy(alpha = 0.25f)),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .clickable { onToggleLowPower3d(!state.studioState.lowPower3dMode) }
+                                    ) {
+                                        Text(
+                                            text = if (state.studioState.lowPower3dMode) "⚡ 2D Güç Tasarrufu" else "🧊 3B Aktif",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                        )
+                                    }
                                     Surface(
                                         shape = RoundedCornerShape(20.dp),
                                         color = GoldStreakAccent.copy(alpha = 0.14f),
                                         border = BorderStroke(1.dp, GoldStreakAccent.copy(alpha = 0.65f))
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.EmojiEvents,
                                                 contentDescription = null,
                                                 tint = GoldStreakAccent,
-                                                modifier = Modifier.size(15.dp)
+                                                modifier = Modifier.size(14.dp)
                                             )
                                             Text(
-                                                text = "${profile.streakDays} Gün Seri 🔥",
-                                                style = MaterialTheme.typography.labelMedium,
+                                                text = "${profile.streakDays}G 🔥",
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White
                                             )
@@ -531,6 +665,106 @@ fun DashboardScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("quick_open_study_hub")
+                        )
+                    }
+                }
+            }
+
+            // 2B. MrStudy 4.0 Studios Hub (All 9 new interactive studios & libraries)
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionHeading(
+                        title = "MrStudy 4.0 Stüdyoları",
+                        icon = Icons.Default.AutoAwesome,
+                        iconTint = NeonPurplePrimary
+                    )
+
+                    FlowRow(
+                        maxItemsInEachRow = 3,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        StudioHubMiniTile(
+                            title = "Bilgi Kartları",
+                            subtitle = "${state.flashcards.size} Kart",
+                            icon = Icons.Default.Style,
+                            accent = CyberCyanTertiary,
+                            tag = "quick_open_flashcards",
+                            onClick = onOpenFlashcards,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "3B Oyun Yap",
+                            subtitle = "${state.studioState.customGames.size} Oyun",
+                            icon = Icons.Default.SportsEsports,
+                            accent = NeonPurplePrimary,
+                            tag = "quick_open_game_studio",
+                            onClick = onOpenGameStudio,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "Diyagram",
+                            subtitle = "${state.studioState.diagrams.size} Şema",
+                            icon = Icons.Default.AccountTree,
+                            accent = ElectricBlueSecondary,
+                            tag = "quick_open_diagram_board",
+                            onClick = onOpenDiagramBoard,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "3B Bilim Lab",
+                            subtitle = "8 Deney",
+                            icon = Icons.Default.Science,
+                            accent = SuccessGreen,
+                            tag = "quick_open_science_lab",
+                            onClick = onOpenScienceLab,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "12 AI Aracı",
+                            subtitle = "Ödev & Sunum",
+                            icon = Icons.Default.Psychology,
+                            accent = NeonPurplePrimary,
+                            tag = "quick_open_ai_tools",
+                            onClick = onOpenAiTools,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "Kodlama",
+                            subtitle = "8 Dil + Web",
+                            icon = Icons.Default.Code,
+                            accent = CyberCyanTertiary,
+                            tag = "quick_open_coding_studio",
+                            onClick = onOpenCodingStudio,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "Mat Tahtası",
+                            subtitle = "Çiz & Çöz",
+                            icon = Icons.Default.Calculate,
+                            accent = ElectricBlueSecondary,
+                            tag = "quick_open_math_board",
+                            onClick = onOpenMathBoard,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "Sesli Ders",
+                            subtitle = "Podcast",
+                            icon = Icons.Default.Headphones,
+                            accent = GoldStreakAccent,
+                            tag = "quick_open_audio_studio",
+                            onClick = onOpenAudioStudio,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioHubMiniTile(
+                            title = "Kütüphane",
+                            subtitle = "Dijital Arşiv",
+                            icon = Icons.Default.LocalLibrary,
+                            accent = SuccessGreen,
+                            tag = "quick_open_digital_library",
+                            onClick = onOpenDigitalLibrary,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
@@ -871,6 +1105,140 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
+    }
+
+    if (showNotificationsDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                onMarkAllNotificationsRead()
+                showNotificationsDialog = false
+            },
+            title = { Text("MrStudy 4.0 Bildirim Merkezi") },
+            text = {
+                if (state.studioState.notifications.isEmpty()) {
+                    Text("Harika gidiyorsun! Şu an yeni bir bildirim bulunmuyor.")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.studioState.notifications.take(8).forEach { notif ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text("${notif.title} • ${notif.tag}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = CyberCyanTertiary)
+                                    Text(notif.body, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onMarkAllNotificationsRead()
+                    showNotificationsDialog = false
+                }) { Text("Tümünü Okundu Say") }
+            }
+        )
+    }
+
+    if (showCountdownDialog) {
+        var examName by remember { mutableStateOf(state.studioState.examCountdownLabel) }
+        var daysLeftText by remember { mutableStateOf(daysToExam.toString()) }
+        AlertDialog(
+            onDismissRequest = { showCountdownDialog = false },
+            title = { Text("Sınav Geri Sayım Widget Ayarı") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = examName,
+                        onValueChange = { examName = it },
+                        label = { Text("Hedef Sınav (Örn: LGS / YKS / Yazılı)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = daysLeftText,
+                        onValueChange = { daysLeftText = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Kalan Gün Sayısı") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val d = daysLeftText.toLongOrNull()?.coerceIn(0L, 1000L) ?: 30L
+                    onSetExamCountdown(
+                        examName.ifBlank { "Hedef Sınav" },
+                        System.currentTimeMillis() + d * 86_400_000L
+                    )
+                    showCountdownDialog = false
+                }) { Text("Kaydet") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCountdownDialog = false }) { Text("İptal") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun StudioHubMiniTile(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accent: Color,
+    tag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    GlassCard(
+        onClick = onClick,
+        cornerRadius = 18.dp,
+        accentBorder = accent,
+        secondaryBorder = accent.copy(alpha = 0.4f),
+        containerColor = Color(0xFF0E162B).copy(alpha = 0.88f),
+        modifier = modifier
+            .heightIn(min = 96.dp)
+            .testTag(tag)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = accent.copy(alpha = 0.22f),
+                border = BorderStroke(1.dp, accent.copy(alpha = 0.55f)),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(imageVector = icon, contentDescription = title, tint = accent, modifier = Modifier.size(20.dp))
+                }
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF94A3B8),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

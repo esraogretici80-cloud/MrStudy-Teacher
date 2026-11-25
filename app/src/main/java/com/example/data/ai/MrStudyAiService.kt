@@ -23,6 +23,9 @@ import com.example.data.model.StudyPlanItem
 import com.example.data.model.TeachingMode
 import com.example.data.model.WorksheetData
 import com.example.data.model.WorksheetPracticeQuestion
+import com.example.core.formatAppCheckUserError
+import com.example.core.isAppCheckErrorMessage
+import com.example.core.verifyOrRefreshAppCheckToken
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Content
@@ -32,7 +35,6 @@ import com.google.firebase.ai.type.ThinkingLevel
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 import com.google.firebase.ai.type.thinkingConfig
-import com.google.firebase.appcheck.FirebaseAppCheck
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
@@ -122,18 +124,11 @@ class MrStudyAiService {
     )
 
     private suspend fun ensureAppCheckReady() {
-        try {
-            val result = withTimeout(APP_CHECK_TIMEOUT_MS) {
-                FirebaseAppCheck.getInstance().getAppCheckToken(false).await()
+        verifyOrRefreshAppCheckToken(allowSingleForceRefresh = true)
+            .onFailure { err ->
+                if (err is CancellationException && err !is TimeoutCancellationException) throw err
+                Log.w(TAG, "App Check preflight diagnostic: ${err.localizedMessage}", err)
             }
-            if (result.token.isBlank()) {
-                Log.w(TAG, "App Check token was blank, proceeding anyway")
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "App Check preflight non-fatal warning: ${e.localizedMessage}, proceeding with request", e)
-        }
     }
 
     private fun isQuotaOrTransientError(error: Throwable): Boolean {
@@ -177,13 +172,9 @@ class MrStudyAiService {
             .joinToString(" | ")
 
         return when {
-            chainMessages.contains("App Check", ignoreCase = true) ||
-                chainMessages.contains("appcheck", ignoreCase = true) ||
-                chainMessages.contains("App attestation failed", ignoreCase = true) ||
-                chainMessages.contains("Exchange failed", ignoreCase = true) ||
-                chainMessages.contains("403", ignoreCase = true) -> {
+            isAppCheckErrorMessage(chainMessages) -> {
                 IllegalStateException(
-                    "Firebase App Check doğrulaması reddedildi (403): Bu cihazdaki Debug Token henüz Firebase Console'a kayıtlı değil. Aşağıdan token'ı kopyalayıp Firebase Console > App Check > Manage debug tokens bölümüne ekleyerek doğrulayabilirsiniz.",
+                    formatAppCheckUserError(error),
                     error
                 )
             }
@@ -213,6 +204,46 @@ class MrStudyAiService {
                 error.localizedMessage ?: "Yapay zekâ yanıtı alınamadı.",
                 error
             )
+        }
+    }
+
+    internal suspend fun generateJsonWithSchema(
+        schema: Schema,
+        promptContent: Content,
+        tiers: List<String> = DEFAULT_TIERS
+    ): String = executeStructuredWithFallback(schema, promptContent, tiers)
+
+    internal suspend fun generatePlainTextWithFallback(
+        promptContent: Content,
+        tiers: List<String> = DEFAULT_TIERS
+    ): String {
+        ensureAppCheckReady()
+        return withTimeout(AI_TOTAL_TIMEOUT_MS) {
+            var lastError: Exception? = null
+            for ((index, modelId) in tiers.withIndex()) {
+                try {
+                    val model = Firebase.ai.generativeModel(
+                        modelName = modelId,
+                        generationConfig = teacherGenerationConfig,
+                        systemInstruction = buildSystemInstruction()
+                    )
+                    val res = model.generateContent(promptContent)
+                    return@withTimeout res.text?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalStateException("$modelId boş yanıt döndürdü.")
+                } catch (e: CancellationException) {
+                    if (e is TimeoutCancellationException) lastError = mapAiError(e) else throw e
+                } catch (e: Exception) {
+                    lastError = e
+                    val hasNext = index < tiers.lastIndex
+                    if (hasNext && isQuotaOrTransientError(e)) {
+                        delay(350L)
+                        continue
+                    } else {
+                        throw mapAiError(e)
+                    }
+                }
+            }
+            throw (lastError?.let(::mapAiError) ?: IllegalStateException("Yapay zekâ yanıtı alınamadı."))
         }
     }
 

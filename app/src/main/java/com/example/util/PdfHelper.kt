@@ -299,7 +299,7 @@ object PdfHelper {
         withContext(Dispatchers.IO) {
             val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
             val safeName = worksheet.title.replace(Regex("[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]"), "_").take(36)
-            val fileName = "MrStudy3_CalismaKagidi_${safeName}_${System.currentTimeMillis()}.pdf"
+            val fileName = "MrStudy4_CalismaKagidi_${safeName}_${System.currentTimeMillis()}.pdf"
             val outFile = File(exportDir, fileName)
 
             val doc = PdfDocument()
@@ -368,7 +368,7 @@ object PdfHelper {
                     4f,
                     accentStripePaint
                 )
-                canvas.drawText("MrStudy 3.0  •  Çalışma Kağıdı", margin + 20f, y + 26f, brandPaint)
+                canvas.drawText("MrStudy 4.0  •  Çalışma Kağıdı", margin + 20f, y + 26f, brandPaint)
                 canvas.drawText(
                     "Ders: ${worksheet.subject}   •   Seviye: ${worksheet.gradeLevel}",
                     margin + 20f,
@@ -499,16 +499,133 @@ object PdfHelper {
     }
 
     fun sharePdfFile(context: Context, file: File) {
+        shareFile(context, file, "application/pdf", "MrStudy 4.0 PDF Olarak Paylaş / Kaydet")
+    }
+
+    fun shareFile(context: Context, file: File, mimeType: String, chooserTitle: String = "MrStudy 4.0 Dosya Paylaş") {
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
             file
         )
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/pdf"
+            type = mimeType
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "MrStudy 3.0 PDF Olarak Paylaş / Kaydet"))
+        context.startActivity(Intent.createChooser(intent, chooserTitle))
     }
+
+    suspend fun exportBitmapAsPng(context: Context, bitmap: Bitmap, prefix: String): File =
+        withContext(Dispatchers.IO) {
+            val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+            val safe = prefix.replace(Regex("[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]"), "_").take(30)
+            val outFile = File(exportDir, "MrStudy4_${safe}_${System.currentTimeMillis()}.png")
+            FileOutputStream(outFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 96, it) }
+            outFile
+        }
+
+    suspend fun exportBitmapAsPdf(context: Context, bitmap: Bitmap, title: String): File =
+        withContext(Dispatchers.IO) {
+            val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+            val safe = title.replace(Regex("[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]"), "_").take(30)
+            val fileName = "MrStudy4_${safe}_${System.currentTimeMillis()}.pdf"
+            val outFile = File(exportDir, fileName)
+            val doc = PdfDocument()
+            val pageW = 595
+            val pageH = 842
+            val page = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 1).create())
+            val c = page.canvas
+            c.drawColor(Color.rgb(11, 15, 25))
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 15f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            c.drawText("MrStudy 4.0  •  $title", 32f, 40f, titlePaint)
+            val availW = pageW - 64f
+            val availH = pageH - 96f
+            val scale = minOf(availW / bitmap.width.coerceAtLeast(1), availH / bitmap.height.coerceAtLeast(1))
+            val drawW = bitmap.width * scale
+            val drawH = bitmap.height * scale
+            val left = (pageW - drawW) / 2f
+            val top = 64f
+            c.drawBitmap(bitmap, null, RectF(left, top, left + drawW, top + drawH), null)
+            doc.finishPage(page)
+            FileOutputStream(outFile).use { doc.writeTo(it) }
+            doc.close()
+            saveCopyToPublicDownloads(context, outFile, fileName)
+            outFile
+        }
+
+    suspend fun exportPresentationPdf(
+        context: Context,
+        title: String,
+        subject: String,
+        slides: List<Pair<String, List<String>>>
+    ): File = withContext(Dispatchers.IO) {
+        val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+        val safe = title.replace(Regex("[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]"), "_").take(30)
+        val fileName = "MrStudy4_Sunum_${safe}_${System.currentTimeMillis()}.pdf"
+        val outFile = File(exportDir, fileName)
+        val doc = PdfDocument()
+        val pageW = 842
+        val pageH = 595
+        val bgPaint = Paint().apply { color = Color.rgb(12, 18, 34) }
+        val accentPaint = Paint().apply { color = Color.rgb(139, 92, 246) }
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 24f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(34, 211, 238)
+            textSize = 13f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val bulletPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(226, 232, 240)
+            textSize = 15f
+        }
+        slides.forEachIndexed { idx, (slideTitle, bullets) ->
+            val page = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, idx + 1).create())
+            val c = page.canvas
+            c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
+            c.drawRect(0f, 0f, 14f, pageH.toFloat(), accentPaint)
+            c.drawText("MrStudy 4.0 • $subject • Slayt ${idx + 1}/${slides.size}", 44f, 48f, subPaint)
+            c.drawText(slideTitle.take(64), 44f, 94f, titlePaint)
+            var y = 148f
+            bullets.forEach { bullet ->
+                val words = bullet.split(" ")
+                var line = "• "
+                for (w in words) {
+                    val cand = if (line == "• ") "• $w" else "$line $w"
+                    if (bulletPaint.measureText(cand) > pageW - 96f) {
+                        c.drawText(line, 48f, y, bulletPaint)
+                        y += 26f
+                        line = "  $w"
+                    } else {
+                        line = cand
+                    }
+                }
+                if (line.isNotBlank()) {
+                    c.drawText(line, 48f, y, bulletPaint)
+                    y += 34f
+                }
+            }
+            doc.finishPage(page)
+        }
+        FileOutputStream(outFile).use { doc.writeTo(it) }
+        doc.close()
+        saveCopyToPublicDownloads(context, outFile, fileName)
+        outFile
+    }
+
+    suspend fun exportTextFile(context: Context, fileName: String, content: String): File =
+        withContext(Dispatchers.IO) {
+            val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+            val outFile = File(exportDir, fileName)
+            outFile.writeText(content)
+            outFile
+        }
 }

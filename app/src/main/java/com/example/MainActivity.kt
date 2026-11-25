@@ -90,18 +90,30 @@ import com.example.core.authStateFlow
 import com.example.core.configureAppCheck
 import com.example.core.signOutUser
 import com.example.data.ai.MrStudyAiService
+import android.content.Intent
 import com.example.data.local.LocalStudyMetricsStore
+import com.example.data.local.MrStudy4LocalStore
 import com.example.data.model.PdfResourceRecord
+import com.example.data.model.StudyNote
 import com.example.data.repository.MrStudyRepository
 import com.example.ui.components.pressableScale
+import com.example.ui.screens.AiToolsScreen
 import com.example.ui.screens.AppCheckSetupDialog
+import com.example.ui.screens.AudioLessonScreen
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.CodingStudioScreen
 import com.example.ui.screens.DashboardScreen
+import com.example.ui.screens.DiagramBoardScreen
+import com.example.ui.screens.DigitalLibraryScreen
 import com.example.ui.screens.ExamCenterScreen
+import com.example.ui.screens.FlashcardStudioScreen
 import com.example.ui.screens.Game3dScreen
+import com.example.ui.screens.GameStudioScreen
 import com.example.ui.screens.LiveLessonScreen
+import com.example.ui.screens.MathBoardScreen
 import com.example.ui.screens.ParentPanelScreen
 import com.example.ui.screens.PdfStudioScreen
+import com.example.ui.screens.ScienceLab3dScreen
 import com.example.ui.screens.StudentProfileDialog
 import com.example.ui.screens.StudyHubScreen
 import com.example.ui.screens.TeacherChatScreen
@@ -111,6 +123,7 @@ import com.example.ui.theme.ElectricBlueSecondary
 import com.example.ui.theme.MrStudyTheme
 import com.example.ui.theme.NeonPurplePrimary
 import com.example.ui.viewmodel.MrStudyViewModel
+import com.example.widget.MrStudyWidgetContract
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -124,6 +137,15 @@ internal object MrStudyRoutes {
     const val EXAM = "exam"
     const val STUDY = "study"
     const val GAME_3D = "game_3d"
+    const val FLASHCARDS = "flashcards"
+    const val GAME_STUDIO = "game_studio"
+    const val DIAGRAM_BOARD = "diagram_board"
+    const val SCIENCE_LAB = "science_lab"
+    const val AI_TOOLS = "ai_tools"
+    const val CODING_STUDIO = "coding_studio"
+    const val MATH_BOARD = "math_board"
+    const val AUDIO_STUDIO = "audio_studio"
+    const val DIGITAL_LIBRARY = "digital_library"
 
     val rootTabs = setOf(DASHBOARD, LIVE_LESSON, TEACHER, PARENT)
 }
@@ -143,21 +165,39 @@ private val mrStudyNavItems = listOf(
 )
 
 class MainActivity : ComponentActivity() {
+    private var pendingWidgetTargetRoute by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // App Check MUST be configured with launch intent before setContent or ViewModels
         configureAppCheck(this, intent)
+        pendingWidgetTargetRoute = intent?.getStringExtra(MrStudyWidgetContract.EXTRA_TARGET_ROUTE)
 
         enableEdgeToEdge()
         setContent {
-            AppRoot()
+            AppRoot(
+                pendingWidgetRoute = pendingWidgetTargetRoute,
+                onConsumePendingWidgetRoute = { pendingWidgetTargetRoute = null }
+            )
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val route = intent.getStringExtra(MrStudyWidgetContract.EXTRA_TARGET_ROUTE)
+        if (!route.isNullOrBlank()) {
+            pendingWidgetTargetRoute = route
         }
     }
 }
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(
+    pendingWidgetRoute: String? = null,
+    onConsumePendingWidgetRoute: () -> Unit = {}
+) {
     val auth = Firebase.auth
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
     val user = currentUser
@@ -184,7 +224,9 @@ private fun AppRoot() {
                             currentUserId = uid,
                             initialDisplayName = user.displayName ?: "Öğrenci",
                             initialEmail = user.email.orEmpty(),
-                            metricsStore = LocalStudyMetricsStore(app, uid)
+                            metricsStore = LocalStudyMetricsStore(app, uid),
+                            studioStore = MrStudy4LocalStore(app, uid),
+                            appContext = app
                         )
                     }
                 }
@@ -192,14 +234,22 @@ private fun AppRoot() {
             val state by viewModel.uiState.collectAsStateWithLifecycle()
 
             MrStudyTheme(themeMode = state.profile.darkThemeMode) {
-                MrStudyAppShell(viewModel = viewModel)
+                MrStudyAppShell(
+                    viewModel = viewModel,
+                    pendingWidgetRoute = pendingWidgetRoute,
+                    onConsumePendingWidgetRoute = onConsumePendingWidgetRoute
+                )
             }
         }
     }
 }
 
 @Composable
-private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
+private fun MrStudyAppShell(
+    viewModel: MrStudyViewModel,
+    pendingWidgetRoute: String? = null,
+    onConsumePendingWidgetRoute: () -> Unit = {}
+) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -248,10 +298,25 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
         }
     }
 
+    LaunchedEffect(pendingWidgetRoute) {
+        val target = pendingWidgetRoute
+        if (!target.isNullOrBlank()) {
+            if (target in MrStudyRoutes.rootTabs) {
+                navigateToTab(target)
+            } else {
+                navigateToScreen(target)
+            }
+            onConsumePendingWidgetRoute()
+        }
+    }
+
     val isLiveRoute = currentRoute == MrStudyRoutes.LIVE_LESSON
     val isGame3dRoute = currentRoute == MrStudyRoutes.GAME_3D
     val isImeVisible = WindowInsets.ime.getBottom(density) > 0
-    val hideBottomChrome = isGame3dRoute || (isLiveRoute && liveState.isSessionActive) || isImeVisible
+    val hideBottomChrome = isGame3dRoute ||
+        currentRoute == MrStudyRoutes.SCIENCE_LAB ||
+        (isLiveRoute && liveState.isSessionActive) ||
+        isImeVisible
 
     // On non-start root tabs (Sohbet, Ebeveyn), system Back pops cleanly (e.g. PDF -> Sohbet -> PDF) or returns to Dashboard instead of closing app.
     if (currentRoute == MrStudyRoutes.TEACHER || currentRoute == MrStudyRoutes.PARENT) {
@@ -352,6 +417,18 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                         viewModel.load3dGameQuestions()
                                         navigateToScreen(MrStudyRoutes.GAME_3D)
                                     },
+                                    onOpenFlashcards = { navigateToScreen(MrStudyRoutes.FLASHCARDS) },
+                                    onOpenGameStudio = { navigateToScreen(MrStudyRoutes.GAME_STUDIO) },
+                                    onOpenDiagramBoard = { navigateToScreen(MrStudyRoutes.DIAGRAM_BOARD) },
+                                    onOpenScienceLab = { navigateToScreen(MrStudyRoutes.SCIENCE_LAB) },
+                                    onOpenAiTools = { navigateToScreen(MrStudyRoutes.AI_TOOLS) },
+                                    onOpenCodingStudio = { navigateToScreen(MrStudyRoutes.CODING_STUDIO) },
+                                    onOpenMathBoard = { navigateToScreen(MrStudyRoutes.MATH_BOARD) },
+                                    onOpenAudioStudio = { navigateToScreen(MrStudyRoutes.AUDIO_STUDIO) },
+                                    onOpenDigitalLibrary = { navigateToScreen(MrStudyRoutes.DIGITAL_LIBRARY) },
+                                    onToggleLowPower3d = viewModel.studioController::setLowPower3dMode,
+                                    onMarkAllNotificationsRead = viewModel.studioController::markAllNotificationsRead,
+                                    onSetExamCountdown = viewModel.studioController::setExamCountdown,
                                     onSwitchGradeMode = viewModel::switchGradeMode,
                                     onToggleDailyTask = viewModel::toggleDailyTask,
                                     onLoadMiniQuiz = viewModel::loadMiniQuiz,
@@ -505,6 +582,140 @@ private fun MrStudyAppShell(viewModel: MrStudyViewModel) {
                                     onGenerateAiFlashcards = viewModel::generateAiFlashcards,
                                     onReviewFlashcard = viewModel::reviewFlashcard,
                                     onDeleteFlashcard = viewModel::deleteFlashcard
+                                )
+                            }
+
+                            composable(MrStudyRoutes.FLASHCARDS) {
+                                FlashcardStudioScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onAddManualCard = viewModel.studioController::addManualFlashcard,
+                                    onEditCard = viewModel.studioController::editFlashcard,
+                                    onDuplicateCard = viewModel.studioController::duplicateFlashcard,
+                                    onDeleteCard = viewModel::deleteFlashcard,
+                                    onReviewTiered = viewModel.studioController::reviewFlashcardTiered,
+                                    onGenerateAiCards = viewModel::generateAiFlashcards
+                                )
+                            }
+
+                            composable(MrStudyRoutes.GAME_STUDIO) {
+                                GameStudioScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onOpenClassic3dSpaceGame = {
+                                        viewModel.load3dGameQuestions()
+                                        navigateToScreen(MrStudyRoutes.GAME_3D)
+                                    },
+                                    onGenerateAiGame = viewModel.studioController::generateAiCustomGame,
+                                    onSaveManualGame = viewModel.studioController::saveManualCustomGame,
+                                    onDeleteGame = viewModel.studioController::deleteCustomGame,
+                                    onRecordCustomGameScore = viewModel.studioController::recordCustomGameCompletion
+                                )
+                            }
+
+                            composable(MrStudyRoutes.DIAGRAM_BOARD) {
+                                DiagramBoardScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onGenerateAiDiagram = viewModel.studioController::generateAiDiagram,
+                                    onSaveDiagram = viewModel.studioController::selectOrSaveDiagram,
+                                    onDeleteDiagram = viewModel.studioController::deleteDiagram,
+                                    onExplainNode = viewModel.studioController::explainDiagramNode,
+                                    onClearNodeExplanation = viewModel.studioController::clearDiagramNodeExplanation,
+                                    onExportDiagram = { diagram, bmp, format ->
+                                        viewModel.studioController.exportDiagramFile(context, diagram, bmp, format)
+                                    }
+                                )
+                            }
+
+                            composable(MrStudyRoutes.SCIENCE_LAB) {
+                                ScienceLab3dScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onQuizCompleted = viewModel.studioController::awardScienceLabQuiz
+                                )
+                            }
+
+                            composable(MrStudyRoutes.AI_TOOLS) {
+                                AiToolsScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onSelectTool = viewModel.studioController::selectAiTool,
+                                    onRunTool = viewModel.studioController::runAiTool,
+                                    onSolveMath = viewModel.studioController::solveMathProblem,
+                                    onGeneratePresentation = viewModel.studioController::generatePresentation,
+                                    onSavePresentation = viewModel.studioController::savePresentation,
+                                    onExportPresentationPdf = { deck ->
+                                        viewModel.studioController.exportPresentationPdf(context, deck)
+                                    },
+                                    onSaveResultAsNote = { subject, title, content ->
+                                        viewModel.saveManualOrEditedNote(
+                                            StudyNote(
+                                                subject = subject,
+                                                title = title,
+                                                content = content
+                                            )
+                                        )
+                                    }
+                                )
+                            }
+
+                            composable(MrStudyRoutes.CODING_STUDIO) {
+                                CodingStudioScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onSaveFile = viewModel.studioController::saveCodeFile,
+                                    onDeleteFile = viewModel.studioController::deleteCodeFile,
+                                    onShareFile = { file ->
+                                        viewModel.studioController.shareCodeFile(context, file)
+                                    },
+                                    onAnalyzeCodeWithAi = viewModel.studioController::analyzeCodeWithAi
+                                )
+                            }
+
+                            composable(MrStudyRoutes.MATH_BOARD) {
+                                MathBoardScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onSolveMath = viewModel.studioController::solveMathProblem,
+                                    onSaveBoard = viewModel.studioController::saveMathBoard,
+                                    onDeleteBoard = viewModel.studioController::deleteMathBoard,
+                                    onExportBoard = { title, bmp, asPdf ->
+                                        viewModel.studioController.exportMathBoard(context, title, bmp, asPdf)
+                                    }
+                                )
+                            }
+
+                            composable(MrStudyRoutes.AUDIO_STUDIO) {
+                                AudioLessonScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onSaveAudioLesson = viewModel.studioController::saveAudioLesson
+                                )
+                            }
+
+                            composable(MrStudyRoutes.DIGITAL_LIBRARY) {
+                                DigitalLibraryScreen(
+                                    state = state,
+                                    onBack = { navigateBackSafely() },
+                                    onOpenPdfStudio = { pdf ->
+                                        viewModel.selectPdfAndLoadPage(pdf, pdf.lastStudiedPage.toInt().coerceAtLeast(1))
+                                        navigateToScreen(MrStudyRoutes.PDF)
+                                    },
+                                    onCreateExamFromPdf = { pdf ->
+                                        preselectedExamPdf = pdf
+                                        navigateToScreen(MrStudyRoutes.EXAM)
+                                    },
+                                    onCreateCardsFromPdf = { pdf ->
+                                        viewModel.generateAiFlashcards(pdf.subject, pdf.title, pdf)
+                                        navigateToScreen(MrStudyRoutes.FLASHCARDS)
+                                    },
+                                    onOpenNoteInStudyHub = { navigateToScreen(MrStudyRoutes.STUDY) },
+                                    onOpenAudioStudio = { navigateToScreen(MrStudyRoutes.AUDIO_STUDIO) },
+                                    onOpenPresentation = { deck ->
+                                        viewModel.studioController.openPresentation(deck)
+                                        navigateToScreen(MrStudyRoutes.AI_TOOLS)
+                                    }
                                 )
                             }
                         }

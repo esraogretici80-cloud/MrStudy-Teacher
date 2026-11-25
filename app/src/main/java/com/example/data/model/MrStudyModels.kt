@@ -45,6 +45,11 @@ enum class TeachingMode(
         title = "Sokratik Mod",
         subtitle = "Doğrudan cevap vermeden düşündürerek öğretim",
         promptGuidance = "Öğrenciye doğrudan nihai cevabı verme. Onu küçük ipuçları ve yönlendirici sorularla kendi çözümüne ulaşmaya teşvik et. Yanlış yaparsa yargılamadan nedenini buldur."
+    ),
+    VISUAL_AUDIO(
+        title = "Görsel & Sesli Anlatım",
+        subtitle = "Şema, adım adım tahta ve sesli anlatım uyumu",
+        promptGuidance = "Konuyu hem görsel şema/diyagram betimlemesiyle hem de sesli dinlemeye uygun net, ritmik cümlelerle anlat. Her bölümde akıllı tahtaya çizilebilecek ana şekli, eksenleri ve formülü açıkça tarif et."
     );
 
     companion object {

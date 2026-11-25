@@ -35,11 +35,12 @@ class ExampleUnitTest {
     @Test
     fun liveLessonUiState_voicePersonas_present() {
         val labels = LiveLessonUiState.voiceOptions.map { it.label }
-        assertTrue(labels.contains("Enerjik Öğretmen"))
-        assertTrue(labels.contains("Sakin Rehber"))
         assertTrue(labels.contains("Genç Asistan"))
-        assertTrue(labels.contains("Tok ve Ciddi Hoca"))
-        assertEquals(4, labels.size)
+        assertTrue(labels.contains("Sakin Öğretmen"))
+        assertTrue(labels.contains("Enerjik Öğretmen"))
+        assertTrue(labels.contains("Resmî Anlatım"))
+        assertTrue(labels.contains("Yumuşak Anlatım"))
+        assertEquals(5, labels.size)
     }
 
     @Test

@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.mrstudy.krtvxm"
     minSdk = 24
     targetSdk = 36
-    versionCode = 3
-    versionName = "3.0"
+    versionCode = 4
+    versionName = "4.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -129,13 +129,14 @@ dependencies {
   implementation(libs.coil.compose)
   // implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
+  implementation(libs.firebase.appcheck)
+  implementation(libs.firebase.appcheck.playintegrity)
+  debugImplementation(libs.firebase.appcheck.debug)
   implementation(libs.firebase.firestore)
   implementation(libs.firebase.auth)
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   // implementation(libs.logging.interceptor)

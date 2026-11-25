@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import com.example.data.model.ErrorCategory
 import com.example.data.model.ExamDifficulty
 import com.example.data.model.PdfResourceRecord
@@ -164,7 +165,12 @@ fun ExamCenterScreen(
 
                 is ExamUiState.InProgress -> {
                     val exam = examState.exam
+                    val examListState = androidx.compose.foundation.lazy.rememberLazyListState()
+                    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+                    val flaggedNumbers = remember(exam.title) { androidx.compose.runtime.mutableStateMapOf<Int, Boolean>() }
+
                     LazyColumn(
+                        state = examListState,
                         modifier = Modifier
                             .fillMaxSize()
                             .imePadding(),
@@ -177,7 +183,7 @@ fun ExamCenterScreen(
                                 accentBorder = NeonPurplePrimary,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -204,7 +210,7 @@ fun ExamCenterScreen(
                                         }
                                     }
                                     Text(
-                                        text = "${exam.subject} • ${exam.difficulty.label} • ${examState.answers.size}/${exam.questions.size} cevaplandı",
+                                        text = "${exam.subject} • ${exam.difficulty.label} • ${examState.answers.size}/${exam.questions.size} cevaplandı • ${flaggedNumbers.count { it.value }} işaretli",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -218,24 +224,75 @@ fun ExamCenterScreen(
                                             .clip(RoundedCornerShape(4.dp)),
                                         color = CyberCyanTertiary
                                     )
+
+                                    // Question Palette
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        exam.questions.forEachIndexed { idx, qItem ->
+                                            val isAnswered = !examState.answers[qItem.number].isNullOrBlank()
+                                            val isFlagged = flaggedNumbers[qItem.number] == true
+                                            val bg = when {
+                                                isFlagged -> WarningAmber.copy(alpha = 0.28f)
+                                                isAnswered -> SuccessGreen.copy(alpha = 0.24f)
+                                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                            }
+                                            val borderColor = when {
+                                                isFlagged -> WarningAmber
+                                                isAnswered -> SuccessGreen
+                                                else -> ElectricBlueSecondary.copy(alpha = 0.35f)
+                                            }
+                                            Surface(
+                                                color = bg,
+                                                border = BorderStroke(1.dp, borderColor),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .clickable {
+                                                        coroutineScope.launch {
+                                                            examListState.animateScrollToItem(idx + 1)
+                                                        }
+                                                    }
+                                            ) {
+                                                Text(
+                                                    text = if (isFlagged) "${qItem.number}★" else "${qItem.number}",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
 
                         items(exam.questions, key = { it.number }) { q ->
                             val currentAns = examState.answers[q.number].orEmpty()
+                            val isFlagged = flaggedNumbers[q.number] == true
                             GlassCard(
                                 cornerRadius = 20.dp,
-                                accentBorder = ElectricBlueSecondary,
+                                accentBorder = if (isFlagged) WarningAmber else ElectricBlueSecondary,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text("Soru ${q.number}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = CyberCyanTertiary)
-                                        Text(q.type.label, style = MaterialTheme.typography.labelSmall, color = Color(0xFFC4B5FD))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(q.type.label, style = MaterialTheme.typography.labelSmall, color = Color(0xFFC4B5FD))
+                                            FilterChip(
+                                                selected = isFlagged,
+                                                onClick = { flaggedNumbers[q.number] = !isFlagged },
+                                                label = { Text(if (isFlagged) "İşaretli" else "İşaretle", style = MaterialTheme.typography.labelSmall) }
+                                            )
+                                        }
                                     }
                                     Text(q.questionText, style = MaterialTheme.typography.bodyLarge)
 

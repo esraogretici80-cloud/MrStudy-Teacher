@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 35%, #121d3a 0%, #070b18 75%, #040710 100%);
+      touch-action: none;
+      font-family: sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #badge {
+      position: fixed;
+      top: 8px;
+      left: 10px;
+      padding: 4px 9px;
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(34, 211, 238, 0.45);
+      color: #22d3ee;
+      font-size: 11px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+  </style>
+  <script src="https://appassets.androidplatform.net/assets/three/three.min.js"></script>
+</head>
+<body>
+  <div id="badge">Three.js WebGL 3B</div>
+  <script>
+    (function () {
+      function reportError(msg) {
+        if (window.MrStudyThreeBridge && window.MrStudyThreeBridge.onWebGlError) {
+          window.MrStudyThreeBridge.onWebGlError(String(msg || "WebGL hatası"));
+        }
+      }
+
+      if (typeof THREE === "undefined") {
+        reportError("Three.js kütüphanesi yüklenemedi.");
+        return;
+      }
+
+      var renderer, scene, camera;
+      try {
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+      } catch (e) {
+        reportError(e && e.message ? e.message : "WebGL başlatılamadı.");
+        return;
+      }
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(48, Math.max(window.innerWidth, 1) / Math.max(window.innerHeight, 1), 0.1, 120);
+
+      var ambient = new THREE.AmbientLight(0xffffff, 0.58);
+      scene.add(ambient);
+      var keyLight = new THREE.DirectionalLight(0xe0f2fe, 1.05);
+      keyLight.position.set(4, 6, 5);
+      scene.add(keyLight);
+      var rimLight = new THREE.PointLight(0xa855f7, 1.2, 24);
+      rimLight.position.set(-4, -2, 3);
+      scene.add(rimLight);
+
+      // Subtle 3D starfield
+      var starCount = 180;
+      var starGeo = new THREE.BufferGeometry();
+      var starPos = new Float32Array(starCount * 3);
+      for (var i = 0; i < starCount; i++) {
+        starPos[i * 3] = (Math.random() - 0.5) * 32;
+        starPos[i * 3 + 1] = (Math.random() - 0.5) * 24;
+        starPos[i * 3 + 2] = -6 - Math.random() * 18;
+      }
+      starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+      var starMat = new THREE.PointsMaterial({ color: 0x93c5fd, size: 0.08, transparent: true, opacity: 0.65 });
+      scene.add(new THREE.Points(starGeo, starMat));
+
+      var rootGroup = new THREE.Group();
+      scene.add(rootGroup);
+
+      var clickableMeshes = [];
+      var dynamicHandles = {};
+      var state = {
+        module: "SOLAR_SYSTEM",
+        zoom: 1.0,
+        orbitSpeed: 1.0,
+        eclipseAngle: 0.0,
+        forceNewton: 20.0,
+        massKg: 4.0,
+        circuitClosed: true,
+        voltageV: 12.0,
+        resistanceOhm: 4.0,
+        temperatureC: 25.0,
+        geometryShapeIdx: 0
+      };
+
+      var yaw = 0.45;
+      var pitch = 0.34;
+      var simTime = 0;
+
+      function updateCamera() {
+        var dist = 5.4 / Math.max(0.55, Math.min(2.0, state.zoom));
+        camera.position.x = dist * Math.sin(yaw) * Math.cos(pitch);
+        camera.position.y = dist * Math.sin(pitch);
+        camera.position.z = dist * Math.cos(yaw) * Math.cos(pitch);
+        camera.lookAt(0, 0, 0);
+      }
+
+      function clearRoot() {
+        while (rootGroup.children.length > 0) {
+          var child = rootGroup.children.pop();
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) child.material.forEach(function (m) { m.dispose(); });
+            else child.material.dispose();
+          }
+        }
+        clickableMeshes = [];
+        dynamicHandles = {};
+      }
+
+      function addSphere(radius, color, emissive, pos, info) {
+        var geo = new THREE.SphereGeometry(radius, 24, 24);
+        var mat = new THREE.MeshStandardMaterial({
+          color: color,
+          emissive: emissive || 0x000000,
+          emissiveIntensity: emissive ? 0.55 : 0.0,
+          roughness: 0.35,
+          metalness: 0.15
+        });
+        var mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(pos[0], pos[1], pos[2]);
+        if (info) {
+          mesh.userData.info = info;
+          clickableMeshes.push(mesh);
+        }
+        rootGroup.add(mesh);
+        return mesh;
+      }
+
+      function addOrbitRing(r) {
+        var geo = new THREE.TorusGeometry(r, 0.014, 8, 64);
+        var mat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.28 });
+        var ring = new THREE.Mesh(geo, mat);
+        ring.rotation.x = Math.PI / 2;
+        rootGroup.add(ring);
+      }
+
+      function rebuildScene() {
+        clearRoot();
+        var m = state.module;
+        if (m === "SOLAR_SYSTEM") {
+          addSphere(0.52, 0xf59e0b, 0xfbbf24, [0, 0, 0], "Güneş: Yüzey sıcaklığı ~5500°C, sistemin kütle merkezidir.");
+          var specs = [
+            { r: 1.0, size: 0.12, col: 0x94a3b8, speed: 1.5, info: "Merkür: Güneş'e en yakın ve atmosferi en ince gezegen." },
+            { r: 1.45, size: 0.17, col: 0x38bdf8, speed: 1.0, info: "Dünya: Yaşam barındıran, %71'i suyla kaplı 3. gezegen." },
+            { r: 1.92, size: 0.15, col: 0xef4444, speed: 0.72, info: "Mars: Yüzeyindeki demir oksit nedeniyle Kızıl Gezegen olarak bilinir." },
+            { r: 2.48, size: 0.27, col: 0xd97706, speed: 0.45, info: "Jüpiter: Güneş Sistemi'nin en büyük gaz devi." }
+          ];
+          dynamicHandles.planets = specs.map(function (sp, idx) {
+            addOrbitRing(sp.r);
+            var mesh = addSphere(sp.size, sp.col, 0x000000, [sp.r, 0, 0], sp.info);
+            return { mesh: mesh, r: sp.r, speed: sp.speed, offset: idx * 1.4 };
+          });
+        } else if (m === "ECLIPSE_SIM") {
+          addSphere(0.55, 0xfbbf24, 0xf59e0b, [-1.95, 0, 0], "Güneş: Dünya ve Ay sisteminin ana ışık kaynağı.");
+          addSphere(0.32, 0x2563eb, 0x0ea5e9, [0.45, 0, 0], "Dünya: Ay tutulması veya güneş tutulması hizasını gözlemle.");
+          dynamicHandles.moon = addSphere(0.14, 0xe2e8f0, 0x475569, [1.55, 0, 0], "Ay: Güneş ile Dünya arasına girdiğinde Güneş Tutulması gerçekleşir.");
+        } else if (m === "FORCE_MOTION") {
+          var track = new THREE.Mesh(
+            new THREE.BoxGeometry(4.4, 0.12, 1.3),
+            new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 })
+          );
+          track.position.y = -0.7;
+          rootGroup.add(track);
+          var boxSize = 0.55 + Math.min(0.65, state.massKg / 28);
+          var cube = new THREE.Mesh(
+            new THREE.BoxGeometry(boxSize, boxSize, boxSize),
+            new THREE.MeshStandardMaterial({ color: 0x8b5cf6, emissive: 0x3b82f6, emissiveIntensity: 0.35 })
+          );
+          cube.position.y = -0.64 + boxSize / 2;
+          cube.userData.info = "F = m · a → Kütle arttıkça aynı kuvvetin oluşturduğu ivme azalır.";
+          clickableMeshes.push(cube);
+          rootGroup.add(cube);
+          dynamicHandles.box = cube;
+        } else if (m === "PLANT_CELL" || m === "HUMAN_ORGANS") {
+          var isCell = m === "PLANT_CELL";
+          var hull = new THREE.Mesh(
+            isCell ? new THREE.BoxGeometry(2.1, 1.7, 1.7) : new THREE.CylinderGeometry(0.95, 0.85, 2.2, 20),
+            new THREE.MeshBasicMaterial({ color: isCell ? 0x10b981 : 0xf43f5e, wireframe: true, transparent: true, opacity: 0.32 })
+          );
+          rootGroup.add(hull);
+          if (isCell) {
+            addSphere(0.34, 0xa855f7, 0x6b21a8, [0, 0, 0], "Çekirdek: Hücrenin genetik bilgi (DNA) ve yönetim merkezidir.");
+            addSphere(0.22, 0xf59e0b, 0xb45309, [0.58, 0.32, 0.25], "Mitokondri: Oksijenli solunumla ATP enerjisi üretir.");
+            addSphere(0.24, 0x10b981, 0x047857, [-0.58, -0.25, 0.28], "Kloroplast: Bitki hücresinde fotosentez yaparak besin üretir.");
+            addSphere(0.28, 0x38bdf8, 0x0284c7, [0.25, -0.42, -0.35], "Koful: Hücre içinde su, besin ve atıkları depolar.");
+          } else {
+            addSphere(0.28, 0xf472b6, 0xbe185d, [0, 0.68, 0], "Beyin: Sinir sisteminin ve istemli hareketlerin komuta merkezidir.");
+            dynamicHandles.heart = addSphere(0.26, 0xef4444, 0x991b1b, [-0.22, 0.1, 0.22], "Kalp: Kanı damarlar yoluyla tüm vücuda pompalayan kaslı organdır.");
+            addSphere(0.25, 0x22d3ee, 0x0e7490, [0.35, 0.15, -0.1], "Akciğerler: Solunum gazlarının (O₂ / CO₂) değişimini sağlar.");
+          }
+        } else if (m === "ELECTRIC_CIRCUIT") {
+          var loop = new THREE.Mesh(
+            new THREE.TorusGeometry(1.35, 0.06, 12, 48),
+            new THREE.MeshStandardMaterial({ color: state.circuitClosed ? 0x22d3ee : 0x64748b, emissive: state.circuitClosed ? 0x0891b2 : 0x000000 })
+          );
+          loop.rotation.x = 0.25;
+          rootGroup.add(loop);
+          var amp = state.circuitClosed ? (state.voltageV / Math.max(1, state.resistanceOhm)) : 0;
+          var intensity = state.circuitClosed ? Math.min(1.6, 0.3 + amp / 6) : 0;
+          dynamicHandles.bulb = addSphere(
+            0.34,
+            state.circuitClosed ? 0xfef08a : 0x475569,
+            state.circuitClosed ? 0xfacc15 : 0x000000,
+            [0, 1.32, 0.33],
+            "Ampul: Ohm Yasasına göre akım I = V / R = " + amp.toFixed(2) + " A"
+          );
+          dynamicHandles.bulb.material.emissiveIntensity = intensity;
+          addSphere(0.26, 0x3b82f6, 0x1d4ed8, [-1.32, 0, 0], "Üreteç (Pil): Devreye " + Math.round(state.voltageV) + " V potansiyel fark sağlar.");
+          addSphere(0.24, 0xa855f7, 0x6b21a8, [1.32, 0, 0], "Direnç: Akıma karşı R = " + Math.round(state.resistanceOhm) + " Ω zorluk gösterir.");
+        } else if (m === "MATTER_STATES") {
+          dynamicHandles.particles = [];
+          var col = state.temperatureC > 100 ? 0xef4444 : (state.temperatureC > 0 ? 0x3b82f6 : 0x22d3ee);
+          var ag = Math.max(0.05, Math.min(1.0, (state.temperatureC + 30) / 160));
+          var spread = 0.55 + ag * 0.95;
+          for (var gx = -1; gx <= 1; gx++) {
+            for (var gy = -1; gy <= 1; gy++) {
+              for (var gz = -1; gz <= 1; gz++) {
+                var p = addSphere(0.14, col, col, [gx * spread, gy * spread, gz * spread],
+                  state.temperatureC < 0 ? "Katı Hal: Tanecikler düzenli ve sıkı titreşim yapar." :
+                  (state.temperatureC < 100 ? "Sıvı Hal: Tanecikler birbiri üzerinden kayarak öteleme yapar." :
+                   "Gaz Hal: Tanecikler arası boşluk çok fazladır, serbest hareket eder."));
+                p.material.emissiveIntensity = 0.25;
+                dynamicHandles.particles.push({ mesh: p, gx: gx, gy: gy, gz: gz });
+              }
+            }
+          }
+        } else if (m === "GEOMETRY_3D") {
+          var g;
+          if (state.geometryShapeIdx === 0) g = new THREE.BoxGeometry(1.6, 1.6, 1.6);
+          else if (state.geometryShapeIdx === 1) g = new THREE.ConeGeometry(1.25, 1.9, 4);
+          else if (state.geometryShapeIdx === 2) g = new THREE.CylinderGeometry(1.05, 1.05, 1.85, 6);
+          else g = new THREE.ConeGeometry(1.15, 1.95, 28);
+          var solid = new THREE.Mesh(
+            g,
+            new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x7c3aed, emissiveIntensity: 0.28, roughness: 0.28, metalness: 0.25 })
+          );
+          solid.userData.info = ["Küp: 6 kare yüz, 12 ayrıt, 8 köşe", "Kare Piramit: 5 yüz, 8 ayrıt, 5 köşe", "Altıgen Prizma: 8 yüz, 18 ayrıt, 12 köşe", "Koni: Dairesel taban ve 1 tepe noktası"][state.geometryShapeIdx] || "3B Geometrik Cisim";
+          clickableMeshes.push(solid);
+          var wire = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x22d3ee, wireframe: true, transparent: true, opacity: 0.55 }));
+          rootGroup.add(solid);
+          rootGroup.add(wire);
+          dynamicHandles.shape = solid;
+          dynamicHandles.wire = wire;
+        }
+      }
+
+      // Touch drag + raycaster tap
+      var dragging = false;
+      var moved = 0;
+      var lastX = 0, lastY = 0;
+      var raycaster = new THREE.Raycaster();
+      var pointer = new THREE.Vector2();
+
+      renderer.domElement.addEventListener("pointerdown", function (e) {
+        dragging = true;
+        moved = 0;
+        lastX = e.clientX;
+        lastY = e.clientY;
+      });
+      renderer.domElement.addEventListener("pointermove", function (e) {
+        if (!dragging) return;
+        var dx = e.clientX - lastX;
+        var dy = e.clientY - lastY;
+        moved += Math.abs(dx) + Math.abs(dy);
+        yaw -= dx * 0.01;
+        pitch = Math.max(-1.35, Math.min(1.35, pitch + dy * 0.01));
+        lastX = e.clientX;
+        lastY = e.clientY;
+      });
+      renderer.domElement.addEventListener("pointerup", function (e) {
+        dragging = false;
+        if (moved < 10 && clickableMeshes.length > 0) {
+          var rect = renderer.domElement.getBoundingClientRect();
+          pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(pointer, camera);
+          var hits = raycaster.intersectObjects(clickableMeshes, false);
+          if (hits.length > 0 && hits[0].object.userData.info) {
+            if (window.MrStudyThreeBridge && window.MrStudyThreeBridge.onPartSelected) {
+              window.MrStudyThreeBridge.onPartSelected(hits[0].object.userData.info);
+            }
+          }
+        }
+      });
+
+      window.addEventListener("resize", function () {
+        camera.aspect = Math.max(window.innerWidth, 1) / Math.max(window.innerHeight, 1);
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      window.mrStudyResetCamera = function () {
+        yaw = 0.45;
+        pitch = 0.34;
+        updateCamera();
+      };
+
+      window.mrStudyUpdateScene = function (jsonStr) {
+        try {
+          var next = typeof jsonStr === "string" ? JSON.parse(jsonStr) : jsonStr;
+          var needsRebuild =
+            next.module !== state.module ||
+            next.circuitClosed !== state.circuitClosed ||
+            Math.round(next.voltageV) !== Math.round(state.voltageV) ||
+            Math.round(next.resistanceOhm) !== Math.round(state.resistanceOhm) ||
+            Math.round(next.massKg) !== Math.round(state.massKg) ||
+            Math.abs(next.temperatureC - state.temperatureC) >= 5 ||
+            next.geometryShapeIdx !== state.geometryShapeIdx;
+          state = Object.assign({}, state, next);
+          if (needsRebuild) rebuildScene();
+          updateCamera();
+        } catch (err) {
+          reportError(err && err.message ? err.message : "Sahne güncelleme hatası");
+        }
+      };
+
+      rebuildScene();
+      updateCamera();
+
+      var lastTs = performance.now();
+      function animate(now) {
+        requestAnimationFrame(animate);
+        var dt = Math.min(0.05, (now - lastTs) / 1000);
+        lastTs = now;
+        simTime += dt * Math.max(0.15, state.orbitSpeed);
+
+        if (dynamicHandles.planets) {
+          dynamicHandles.planets.forEach(function (pl) {
+            var a = simTime * pl.speed + pl.offset;
+            pl.mesh.position.x = Math.cos(a) * pl.r;
+            pl.mesh.position.z = Math.sin(a) * pl.r;
+          });
+        }
+        if (dynamicHandles.moon) {
+          dynamicHandles.moon.position.x = 0.45 + Math.cos(state.eclipseAngle) * 1.15;
+          dynamicHandles.moon.position.y = Math.sin(state.eclipseAngle * 0.5) * 0.25;
+          dynamicHandles.moon.position.z = Math.sin(state.eclipseAngle) * 1.15;
+        }
+        if (dynamicHandles.box) {
+          var accel = state.forceNewton / Math.max(1, state.massKg);
+          dynamicHandles.box.position.x = Math.sin(simTime * (0.45 + accel * 0.1)) * 1.45;
+        }
+        if (dynamicHandles.heart) {
+          var beat = 1 + 0.12 * Math.abs(Math.sin(now * 0.005));
+          dynamicHandles.heart.scale.set(beat, beat, beat);
+        }
+        if (dynamicHandles.particles) {
+          var ag = Math.max(0.05, Math.min(1.0, (state.temperatureC + 30) / 160));
+          var spread = 0.55 + ag * 0.95;
+          dynamicHandles.particles.forEach(function (pt, idx) {
+            var jx = Math.sin(now * 0.004 * (1 + ag * 4) + idx) * ag * 0.18;
+            var jy = Math.cos(now * 0.004 * (1 + ag * 4) + idx * 1.3) * ag * 0.18;
+            pt.mesh.position.set(pt.gx * spread + jx, pt.gy * spread + jy, pt.gz * spread);
+          });
+        }
+        if (dynamicHandles.shape && dynamicHandles.wire) {
+          dynamicHandles.shape.rotation.y += dt * 0.35;
+          dynamicHandles.wire.rotation.y = dynamicHandles.shape.rotation.y;
+        }
+
+        updateCamera();
+        renderer.render(scene, camera);
+      }
+      requestAnimationFrame(animate);
+    })();
+  </script>
+</body>
+</html>

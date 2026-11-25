@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg_card"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/dq_subject"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Günün Sorusu • Matematik"
+            android:textColor="#22D3EE"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_dq_next"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:background="@drawable/widget_pill_btn"
+            android:paddingHorizontal="8dp"
+            android:text="Sonraki"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/dq_prompt"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="3x - 7 = 14 denkleminde x kaçtır?"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:maxLines="2" />
+
+    <TextView
+        android:id="@+id/dq_feedback"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="Doğru şıkka dokun"
+        android:textColor="#94A3B8"
+        android:textSize="11sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btn_dq_opt_0"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:background="@drawable/widget_pill_btn"
+            android:text="A"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btn_dq_opt_1"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:background="@drawable/widget_pill_btn"
+            android:text="B"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btn_dq_opt_2"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:background="@drawable/widget_pill_btn"
+            android:text="C"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btn_dq_opt_3"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:background="@drawable/widget_pill_btn"
+            android:text="D"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+    </LinearLayout>
+</LinearLayout>

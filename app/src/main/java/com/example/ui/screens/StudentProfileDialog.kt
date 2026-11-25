@@ -141,7 +141,7 @@ fun StudentProfileDialog(
                             .testTag("profile_appcheck_setup_button")
                     ) {
                         Icon(Icons.Default.Security, contentDescription = null)
-                        Text("  App Check Cihaz Doğrulaması")
+                        Text("  Güvenlik ve App Check Durumu")
                     }
                     OutlinedButton(
                         onClick = onSignOut,
